@@ -1,0 +1,9 @@
+services:
+  doctor-sim:
+    build: .
+    container_name: doctor-sim
+    ports:
+      - "8003:8003"
+    env_file:
+      - .env
+    restart: unless-stopped

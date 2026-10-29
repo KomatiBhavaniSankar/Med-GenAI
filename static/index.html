@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Doctor GenAI Simulation</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>
+tailwind.config={theme:{extend:{colors:{ok:'#1F7A4D',brand:{DEFAULT:'#0E7C86',dark:'#0A5A62',soft:'#D7EEF0'},mist:{DEFAULT:'#EAF4F6',deep:'#CFE3E8'},alert:'#C62828',ink:'#12303A'},
+fontFamily:{serif:['Fraunces','serif'],sans:['"Instrument Sans"','sans-serif']}}}}
+</script>
+<style>
+/* hospital background: drop your photos in static/images/ (see README.txt there) */
+html{background:#EAF4F6}
+body{--o1:.80;--o2:.92;background:transparent}
+body[data-page=reg],body[data-page=tabs],body[data-page=mode],body[data-page=video]{--o1:.50;--o2:.72}
+body::before{content:"";position:fixed;inset:0;z-index:-1;background-color:#EAF4F6;
+ background-image:linear-gradient(180deg,rgba(234,244,246,var(--o1)),rgba(234,244,246,var(--o2))),url(/static/images/hospital-bg.jpg),url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96'%3E%3Cpath d='M44 36h8v8h8v8h-8v8h-8v-8h-8v-8h8z' fill='%230E7C86' fill-opacity='.07'/%3E%3C/svg%3E");
+ background-size:cover,cover,96px 96px;background-position:center;background-repeat:no-repeat,no-repeat,repeat}
+@media(max-width:767px){body::before{background-image:linear-gradient(180deg,rgba(234,244,246,var(--o1)),rgba(234,244,246,var(--o2))),url(/static/images/hospital-bg-mobile.jpg),url(/static/images/hospital-bg.jpg),url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96'%3E%3Cpath d='M44 36h8v8h8v8h-8v8h-8v-8h-8v-8h8z' fill='%230E7C86' fill-opacity='.07'/%3E%3C/svg%3E");
+ background-size:cover,cover,cover,96px 96px;background-repeat:no-repeat,no-repeat,no-repeat,repeat}}
+@keyframes pop{0%{transform:scale(1)}40%{transform:scale(1.22)}100%{transform:scale(1)}}.pop{animation:pop .45s ease}
+@media print{body::before,#rxfab{display:none!important}body *{visibility:hidden}#sheet,#sheet *{visibility:visible}#sheet{position:absolute;left:0;top:0;width:100%;border:0;background:#fff!important}.noprint{display:none!important}}
+.nav{scrollbar-width:none;-webkit-overflow-scrolling:touch}.nav::-webkit-scrollbar{display:none}
+.ed{field-sizing:content;min-height:2.75rem}
+:focus-visible{outline:2px solid #0E7C86;outline-offset:2px}
+</style>
+</head>
+<body class="text-ink font-sans min-h-screen" data-page="">
+<header id="top" class="hidden sticky top-0 z-20 bg-brand text-white shadow-md pt-[env(safe-area-inset-top)]">
+  <div class="mx-auto w-full max-w-6xl px-4 sm:px-6 h-12 flex items-center justify-between gap-3">
+    <span class="flex items-center gap-2 min-w-0"><svg viewBox="0 0 24 24" class="w-6 h-6 shrink-0" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6" fill="#fff"/><path d="M10 5h4v5h5v4h-5v5h-4v-5H5v-4h5z" fill="#0E7C86"/></svg><span id="who" class="truncate min-w-0 text-sm sm:text-base font-medium"></span></span>
+    <span id="clk" class="shrink-0 font-serif text-lg sm:text-2xl tabular-nums"></span>
+  </div>
+  <div id="navw" class="bg-brand-dark"><nav id="nav" aria-label="Sections" class="nav mx-auto w-full max-w-6xl px-2 sm:px-4 pt-2 flex items-end gap-1 overflow-x-auto text-sm"></nav></div>
+</header>
+<main id="app" class="mx-auto w-full max-w-6xl px-4 sm:px-6 py-5 sm:py-8 pb-28"></main>
+<div id="rxfab"></div>
+<div id="bn" role="status" onclick="this.classList.add('hidden')" class="hidden fixed top-28 inset-x-3 sm:inset-x-auto sm:right-6 sm:w-96 z-30 bg-ink text-white rounded-2xl p-4 shadow-xl cursor-pointer"></div>
+<div id="toast" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 bg-ink text-white text-sm px-4 py-2 rounded-full z-30"></div>
+<script>
+const API='/api';
+let C=[];
+const S={doc:null,sid:null,c:null,page:null,t0:0,q:[],name:'',left:0,timer:null,items:[],plan:[],own:[],seg:[],who:'Doctor',auto:true,open:{},vd:0,mode:'',nc:{},interim:'',recOn:false,rt0:0,cm:'',fp:{},appr:false,asked:{},rev:{},ord:{},tos:[],step:0,ed:{},ownN:0};
+const COL=['#4472C4','#8E5BBE','#DD8A1B','#7A5230','#D4BE12','#5BB5CC','#D45A9B','#5F6B7C'];
+const NAV=[['complaint','Complaint'],['record','Record'],['questions','Suggested Questions'],['dxrec','Diagnosis & Plan'],['plan','Treatment plan'],['records','Records'],['trends','Trends'],['rx','Prescription'],['fu','Follow-up plan']];
+const CAT={med:'Medicines',tst:'Tests',fu:'Follow-up'};
+const PCAT={...CAT,asm:'Patient assessment',mnm:'Must not miss',dx:'Diagnosis'},PKEYS=['asm','mnm','dx','med','tst','fu'];
+const srcLbl=x=>x==='own'?'yours':x==='ai'?'AI suggested':'global';
+const NOREC='Sorry, I don’t have access to hospital records. If I did, I would show the full history linked to this patient’s UHID.';
+const SIM='Draft case set. Simulated data, not for clinical use.';
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const $=id=>document.getElementById(id);
+const send=(u,b)=>fetch(API+u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(r=>{if(!r.ok)throw 0;return r.json()});
+function log(t,l,ms){S.q.push({session_id:S.sid,doctor_id:S.doc,page:S.page,event_type:t,label:l??null,duration_ms:ms??null,client_ts:new Date().toISOString()})}
+function flush(beacon){if(!S.q.length||(!S.doc&&!beacon))return;const evs=S.q;S.q=[];const body=JSON.stringify({events:evs});
+ if(beacon)navigator.sendBeacon(API+'/events',new Blob([body],{type:'application/json'}));
+ else fetch(API+'/events',{method:'POST',headers:{'Content-Type':'application/json'},body}).then(r=>{if(!r.ok)throw 0}).catch(()=>{S.q=evs.concat(S.q)})}
+setInterval(()=>flush(),5000);
+document.addEventListener('visibilitychange',()=>log(document.hidden?'tab_hidden':'tab_visible'));
+addEventListener('pagehide',()=>{if(S.page)log('page_time',null,Date.now()-S.t0);flush(true)});
+document.addEventListener('click',e=>{const b=e.target.closest('button,a');if(b)log('click',b.dataset.l||b.innerText.trim().slice(0,50))});
+function toast(m){const t=$('toast');t.textContent=m;t.classList.remove('hidden');setTimeout(()=>t.classList.add('hidden'),1800)}
+function go(p){if(S.page)log('page_time',null,Date.now()-S.t0);window.speechSynthesis&&speechSynthesis.cancel();S.page=p;S.t0=Date.now();log('page_view',p);render();scrollTo(0,0)}
+
+const grid='grid gap-3 md:grid-cols-2',card='bg-white/90 backdrop-blur-sm rounded-2xl p-4 border border-mist-deep shadow-sm',
+ btn='bg-brand text-white rounded-xl px-4 py-3 font-semibold active:bg-brand-dark w-full',
+ ghost='border border-brand text-brand rounded-xl px-4 py-3 font-semibold',
+ inp='w-full rounded-xl border border-mist-deep bg-mist/50 px-3 py-2 text-base',
+ chk='mt-1 w-5 h-5 accent-[#0E7C86]';
+const h2=(t,s)=>`<h2 class="font-serif text-2xl font-bold">${t}</h2>${s?`<p class="text-sm text-ink/70 mt-1 max-w-2xl">${s}</p>`:''}<div class="mb-4"></div>`;
+const h3=(t,m)=>`<h3 class="font-serif text-xl font-bold mb-2 ${m||'mt-7'}">${t}</h3>`;
+const stakes=c=>`<span class="text-xs font-semibold rounded-full px-2 py-0.5 ${c.hi?'bg-alert text-white':'bg-ok/10 text-ok'}">${c.hi?'High stakes':'Low stakes'}</span>`;
+const fmt=ms=>{const s=Math.floor(ms/1000);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
+const lik=l=>/^High|to high/.test(l)?'bg-alert text-white':/Moderate|to moderate/.test(l)?'bg-amber-200 text-amber-900':'bg-stone-200 text-stone-700';
+const join=(a,b,c)=>a+(b?' — '+b:'')+(c?' — '+c:'');
+const inPlan=(c,t)=>S.plan.some(p=>p.c===c&&p.t===t);
+const rv=k=>{S.rev[k]=1;log('reveal',k);render()};
+const mustItems=c=>{const t=c.must.replace(/^Must not miss\.\s*/,''),k=t.search(/\.\s/);return [{t:(k<0?t:t.slice(0,k+1)).trim(),note:k<0?'':t.slice(k+1).trim()}]};
+const acc=(k,title,sub,body,cls)=>{const o=S.open[k];return `<div class="rounded-2xl mb-3 overflow-hidden border border-mist-deep"><button data-l="${o?'close':'open'} ${title}" aria-expanded="${!!o}" onclick="S.open['${k}']=!S.open['${k}'];log('toggle_section',S.open['${k}']?'open ${k}':'close ${k}');render()" class="w-full flex items-center justify-between gap-3 text-left p-4 ${cls}"><span><b class="font-serif text-xl">${title}</b><span class="block text-sm opacity-80">${sub}</span></span><span class="text-2xl leading-none transition-transform ${o?'rotate-180':''}" aria-hidden="true">⌄</span></button>${o?`<div class="p-3 bg-mist/60">${body}</div>`:''}</div>`};
+function summary(){return PKEYS.map(c=>{const l=S.plan.filter(p=>p.c===c);return `<div><b>${PCAT[c]}</b>${l.length?`<ul class="list-disc pl-5 text-sm mt-1">${l.map(p=>`<li>${esc(p.t)} <span class="text-xs text-ink/50">(${srcLbl(p.src)})</span></li>`).join('')}</ul>`:'<p class="text-sm text-ink/50">Nothing selected</p>'}</div>`}).join('')}
+const rxLines=c=>S.plan.filter(p=>p.c===c).map(p=>p.t);
+const nextDate=()=>S.fp.days?new Date(Date.now()+S.fp.days*864e5).toLocaleDateString([],{day:'numeric',month:'short',year:'numeric'}):'';
+const callout=(t,x,cls)=>x?`<div role="alert" class="rounded-2xl p-4 mb-3 ${cls}"><b>${t}</b><p class="mt-1">${esc(x)}</p></div>`:'';
+const revealRow=(k,q,a,why,lab)=>`<div class="${card}"><p class="font-medium">${esc(q)}</p>${S.rev[k]?`<p class="mt-2 border-l-4 border-brand pl-3">${esc(a)}</p>${why?`<p class="text-sm text-ink/60 mt-1">${esc(why)}</p>`:''}`:`<button data-l="${lab} ${k}" onclick="rv('${k}')" class="mt-2 text-brand text-sm font-semibold">${lab}</button>`}</div>`;
+
+/* ---- Diagnosis & Plan: one page, step by step. Tick AI items, edit them, or write your own. ---- */
+const GRP={
+ asm:{t:'Patient assessment',h:'Findings from the history and examination. Tick the ones you agree with, edit the wording, or add your own.',own:'Add your own assessment',ph:'e.g. Cold clammy peripheries, mild ankle swelling'},
+ mnm:{t:'Must not miss',h:'Serious conditions to rule out before you settle on a diagnosis.',own:'Add your own must-not-miss item',ph:'e.g. Rule out aortic dissection before any clot-buster'},
+ dx:{t:'Diagnosis',h:'Possible diagnoses from the information so far. They support, and do not replace, your clinical judgement. Write your own diagnosis or your reasoning below.',own:'Add your own diagnosis or reasoning',ph:'e.g. Inferior STEMI with RV involvement, based on ECG and V4R'},
+ med:{t:'Medicines',h:'Global evidence-based options. Tick, edit the dose and duration, or write your own prescription line.',own:'Add your own medicine',ph:'e.g. Tab Aspirin 300 mg chewed, once now'},
+ tst:{t:'Tests',h:'Investigations to order now, and others to consider if needed.',own:'Add your own test',ph:'e.g. Bedside echocardiogram'},
+ fu:{t:'Advice and follow-up',h:'Monitoring, return advice and review. Add anything you would tell this patient.',own:'Add your own advice',ph:'e.g. Review in OPD after 1 week with reports'}};
+const STEPS=[
+ {t:'Assessment',g:['asm','mnm'],h:'Check the patient first.'},
+ {t:'Diagnosis',g:['dx'],h:'Decide what is going on.'},
+ {t:'Medicines',g:['med'],h:'Choose treatment.'},
+ {t:'Tests',g:['tst'],h:'Order investigations.'},
+ {t:'Advice & follow-up',g:['fu'],h:'Plan the next visit.'},
+ {t:'Review',g:null,h:'Check the whole plan.'}];
+const FUSRC={med:'global',tst:'global',fu:'global'};
+function aiItems(k){const c=S.c;
+ if(k==='asm')return c.exam.map(t=>({t}));
+ if(k==='mnm')return mustItems(c).map(m=>({t:m.t,note:m.note}));
+ if(k==='dx')return c.dx.map(d=>({t:d.n,badge:d.lik,note:d.basis}));
+ if(k==='med')return c.meds.map(m=>({t:join(m.n,m.use,m.note)}));
+ if(k==='tst')return [...c.tests.map(t=>({t:join(t.t,t.why)})),...c.related.map(t=>({t:join(t.t,'if needed: '+t.when)}))];
+ if(k==='fu')return [{t:c.fu.w},...c.fu.m.map(t=>({t:'Monitor: '+t})),...c.fu.u.map(t=>({t:'Return urgently if: '+t}))];
+ return[]}
+const pf=k=>S.plan.find(p=>p.k===k);
+const cntCat=k=>S.plan.filter(p=>p.c===k&&p.t&&p.t.trim()).length;
+function dtog(k,cat,i){const p=pf(k);
+ if(p){const o=aiItems(cat)[i];if(p.t!==o.t)S.ed[k]=p.t;S.plan.splice(S.plan.indexOf(p),1);log('remove_from_plan',p.t.slice(0,60))}
+ else{const t=S.ed[k]??aiItems(cat)[i].t;S.plan.push({k,c:cat,t,src:FUSRC[cat]||'ai'});log('add_to_sheet',cat+': '+t.slice(0,60))}
+ render()}
+function dedit(k,v){const p=pf(k);if(p)p.t=v;S.ed[k]=v}
+function dedited(k){const p=pf(k);if(p)log('plan_edit',p.t.slice(0,40))}
+function dreset(k,cat,i){const p=pf(k),o=aiItems(cat)[i].t;if(p)p.t=o;delete S.ed[k];log('restore_original',k);render()}
+function dall(cat){aiItems(cat).forEach((a,i)=>{const k=cat+':'+i;if(!pf(k))S.plan.push({k,c:cat,t:S.ed[k]??a.t,src:FUSRC[cat]||'ai'})});log('add_all_ai',cat);render()}
+function dclear(cat){S.plan=S.plan.filter(p=>!(p.c===cat&&/^[a-z]+:\d+$/.test(p.k||'')));log('clear_ai',cat);render()}
+function addOwn2(cat,txt){const el=$('own_'+cat),t=(txt??el?.value??'').trim();if(!t)return;
+ const k='own:'+(++S.ownN);S.own.push({k,c:cat,t});S.plan.push({k,c:cat,t,src:'own'});log('add_own',cat+': '+t.slice(0,60));render();setTimeout(()=>$('own_'+cat)?.focus(),0)}
+function addLine(cat){const k='own:'+(++S.ownN);S.own.push({k,c:cat,t:''});S.plan.push({k,c:cat,t:'',src:'own'});render()}
+function otog(k){const o=S.own.find(x=>x.k===k),p=pf(k);if(!o)return;
+ if(p){o.t=p.t;S.plan.splice(S.plan.indexOf(p),1);log('remove_from_plan',o.t.slice(0,60))}else{S.plan.push({k,c:o.c,t:o.t,src:'own'});log('add_to_sheet',o.c+': '+o.t.slice(0,60))}render()}
+function oedit(k,v){const o=S.own.find(x=>x.k===k),p=pf(k);if(o)o.t=v;if(p)p.t=v}
+function odel(k){S.own=S.own.filter(x=>x.k!==k);S.plan=S.plan.filter(p=>p.k!==k);log('delete_own',k);render()}
+function gs(i){S.step=Math.max(0,Math.min(STEPS.length-1,i));log('dx_step',STEPS[S.step].t);render();scrollTo({top:0,behavior:'smooth'})}
+const chip=(t,cls)=>`<span class="text-xs font-semibold rounded-full px-2 py-0.5 h-fit whitespace-nowrap ${cls}">${t}</span>`;
+function aiRow(cat,i,a){const k=cat+':'+i,p=pf(k),on=!!p,cur=on?p.t:(S.ed[k]??a.t),edited=cur!==a.t,
+ badge=a.badge?chip(esc(a.badge),lik(a.badge)):'',note=a.note?`<span class="block text-sm text-ink/60 mt-1">${esc(a.note)}</span>`:'';
+ if(!on)return `<label class="flex gap-3 items-start cursor-pointer rounded-xl border border-mist-deep bg-white p-3 hover:border-brand"><input type="checkbox" class="${chk}" onchange="dtog('${k}','${cat}',${i})"><span class="flex-1 min-w-0"><span class="flex justify-between gap-2"><span class="font-medium">${esc(cur)}</span>${badge}</span>${edited?`<span class="text-xs text-brand">edited</span>`:''}${note}</span></label>`;
+ return `<div class="flex gap-3 items-start rounded-xl border border-brand ring-1 ring-brand bg-white p-3"><input type="checkbox" checked aria-label="Remove from plan" class="${chk}" onchange="dtog('${k}','${cat}',${i})"><div class="flex-1 min-w-0"><div class="flex justify-between gap-2 mb-1"><span class="text-xs font-semibold text-brand">✓ In the plan. Edit the wording if you wish.</span>${badge}</div><textarea rows="2" class="${inp} ed" oninput="dedit('${k}',this.value)" onchange="dedited('${k}')">${esc(cur)}</textarea>${note}${edited?`<button data-l="restore original" onclick="dreset('${k}','${cat}',${i})" class="text-xs text-brand font-semibold mt-1">Restore original wording</button>`:''}</div></div>`}
+function ownRow(o){const on=!!pf(o.k),t=on?pf(o.k).t:o.t;
+ return `<div class="flex gap-3 items-start rounded-xl border bg-white p-3 ${on?'border-brand ring-1 ring-brand':'border-mist-deep'}"><input type="checkbox" ${on?'checked':''} aria-label="${on?'Remove from plan':'Add to plan'}" class="${chk}" onchange="otog('${o.k}')"><div class="flex-1 min-w-0"><div class="mb-1">${chip('Yours','bg-brand-soft text-brand-dark')}<span class="text-xs text-ink/50 ml-2">${on?'In the plan':'Not in the plan (tick to add)'}</span></div><textarea rows="2" class="${inp} ed" oninput="oedit('${o.k}',this.value)" onchange="log('plan_edit',this.value.slice(0,40))">${esc(t)}</textarea></div><button data-l="delete own" aria-label="Delete my item" onclick="odel('${o.k}')" class="text-alert text-2xl px-1 leading-none">×</button></div>`}
+function dgroup(cat){const G=GRP[cat],ai=aiItems(cat),own=S.own.filter(o=>o.c===cat),n=cntCat(cat),c=S.c,
+ edge=cat==='mnm'?(c.hi?'border-l-4 border-l-alert':'border-l-4 border-l-amber-400'):'';
+ const pre=cat==='med'?callout('On the patient’s request',c.reqNote,'bg-white border border-brand')+callout('Cautions',(c.cautions||[]).join(' '),'bg-amber-100 text-amber-900'):'';
+ return `<section class="${card} mb-4 ${edge}"><div class="flex items-baseline justify-between gap-2"><h3 class="font-serif text-xl font-bold">${G.t}</h3>${chip(n+' in plan',n?'bg-ok/10 text-ok':'bg-stone-200 text-stone-700')}</div><p class="text-sm text-ink/70 mt-1 mb-3">${G.h}</p>${pre}
+ <div class="flex items-center justify-between gap-2 mt-3 mb-2"><p class="text-xs font-bold uppercase tracking-wide text-brand">AI suggestions</p><span class="text-xs"><button data-l="add all ${cat}" onclick="dall('${cat}')" class="text-brand font-semibold">Add all</button><span class="text-ink/30 mx-2">|</span><button data-l="clear ai ${cat}" onclick="dclear('${cat}')" class="text-ink/60 font-semibold">Clear</button></span></div>
+ <div class="space-y-2">${ai.map((a,i)=>aiRow(cat,i,a)).join('')||'<p class="text-sm text-ink/50">No suggestions.</p>'}</div>
+ <p class="text-xs font-bold uppercase tracking-wide text-ink/60 mt-5 mb-2">Your own</p>
+ <div class="space-y-2">${own.map(ownRow).join('')||'<p class="text-sm text-ink/50">Nothing of your own yet. You can use only the ticks above, only your own words, or both.</p>'}</div>
+ <div class="flex gap-2 items-start mt-3"><textarea id="own_${cat}" rows="2" aria-label="${G.own}" placeholder="${G.own}. ${G.ph}" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addOwn2('${cat}')}" class="${inp} ed"></textarea><button data-l="add own ${cat}" onclick="addOwn2('${cat}')" class="${ghost} py-2 bg-white shrink-0">Add</button></div></section>`}
+function dreview(){const stOf=k=>STEPS.findIndex(s=>s.g&&s.g.includes(k)),nodx=!cntCat('dx');
+ return (nodx?`<div role="alert" class="rounded-2xl p-3 mb-3 bg-amber-100 text-amber-900 text-sm"><b>No diagnosis added yet.</b> <button data-l="go to diagnosis" onclick="gs(1)" class="underline font-semibold">Add one</button></div>`:'')+
+ `<section class="${card} mb-4"><h3 class="font-serif text-xl font-bold">Treatment plan so far</h3><p class="text-sm text-ink/70 mt-1">Everything you ticked or wrote. Remove a line with ×, or go back to a step to change it.</p><div class="grid gap-5 md:grid-cols-2 mt-4">${PKEYS.map(k=>{const rows=S.plan.map((p,i)=>p.c===k&&p.t&&p.t.trim()?`<li class="flex gap-2 items-start text-sm py-1.5 border-b border-mist-deep last:border-0"><span class="flex-1 min-w-0 break-words">${esc(p.t)} <span class="text-xs text-ink/50">(${srcLbl(p.src)})</span></span><button data-l="remove from plan" aria-label="Remove" onclick="cartRm(${i})" class="text-alert text-xl leading-none px-1">×</button></li>`:'').join('');
+  return `<div><div class="flex justify-between items-baseline"><b>${PCAT[k]}</b><button data-l="edit ${k}" onclick="gs(${stOf(k)})" class="text-xs text-brand font-semibold">Edit</button></div>${rows?`<ul>${rows}</ul>`:'<p class="text-sm text-ink/50 mt-1">Nothing added</p>'}</div>`}).join('')}</div></section>`}
+function dxPage(){const c=S.c,st=Math.max(0,Math.min(S.step||0,STEPS.length-1)),s=STEPS[st],last=st===STEPS.length-1,
+ cn=x=>x.g?x.g.reduce((n,k)=>n+cntCat(k),0):RXN();
+ const pills=STEPS.map((x,i)=>{const on=i===st,n=cn(x),done=n>0&&!on;
+  return `<li class="shrink-0"><button data-l="step ${x.t}" ${on?'aria-current="step"':''} onclick="gs(${i})" class="flex items-center gap-2 rounded-full pl-1.5 pr-3 py-1.5 text-sm font-semibold border ${on?'bg-brand text-white border-brand':'bg-white text-ink border-mist-deep hover:border-brand'}"><span class="w-6 h-6 rounded-full grid place-items-center text-xs ${on?'bg-white text-brand':done?'bg-ok text-white':'bg-mist-deep text-ink/70'}">${done?'✓':i+1}</span>${x.t}${x.g&&n?`<span class="text-xs ${on?'text-white/80':'text-ink/50'}">${n}</span>`:''}</button></li>`}).join('');
+ const sum=String(c.summary||'').replace(/^Case summary\.\s*/,'');
+ return h2('Diagnosis & Plan','Work through the steps, or jump to any step. Tick the AI suggestions you agree with, edit them, or write your own. Everything you add goes into the treatment plan.')+
+ `<details ${(S.sd===undefined?st===0:S.sd)?'open':''} ontoggle="S.sd=this.open" class="${card} mb-4"><summary class="cursor-pointer font-semibold flex flex-wrap items-center gap-2">Patient summary and vitals<span class="text-xs font-semibold rounded-full px-2 py-0.5 bg-sky-700 text-white">Vitals given by Nurse</span></summary><p class="text-sm mt-3">${esc(sum)}</p><ul class="grid sm:grid-cols-2 gap-x-6 mt-2 text-sm">${(c.vitals||[]).map(v=>`<li>${esc(v)}</li>`).join('')}</ul></details>
+ <nav aria-label="Steps"><ol class="nav flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">${pills}</ol></nav>
+ <div class="flex items-center gap-3 mt-2 mb-4"><div class="flex-1 h-1.5 rounded-full bg-mist-deep overflow-hidden"><div class="h-full bg-brand transition-all" style="width:${Math.round((st+1)/STEPS.length*100)}%"></div></div><span class="text-xs text-ink/60 tabular-nums">Step ${st+1} of ${STEPS.length}</span></div>
+ <div class="max-w-3xl">${last?dreview():s.g.map(dgroup).join('')}
+ <div class="grid ${last?'sm:grid-cols-3':'grid-cols-2'} gap-3 mt-2">${st>0?`<button data-l="step back" onclick="gs(${st-1})" class="${ghost} bg-white">← ${STEPS[st-1].t}</button>`:'<span></span>'}${last?`<button data-l="go to plan" onclick="go('plan')" class="${ghost} bg-white">Edit treatment plan</button><button data-l="prepare prescription" onclick="go('rx')" class="${btn}">Prepare prescription</button>`:`<button data-l="step next" onclick="gs(${st+1})" class="${btn}">${STEPS[st+1].t} →</button>`}</div></div>`}
+
+function render(){
+ const p=S.page,app=$('app'),c=S.c,inApp=NAV.some(n=>n[0]===p);document.body.dataset.page=p||'';
+ const sub=p==='mode'||p==='normal';$('top').classList.toggle('hidden',!(inApp||sub));$('navw').classList.toggle('hidden',!inApp);
+ if(p==='reg'){app.innerHTML=`<div class="pt-4 sm:pt-10 max-w-xl mx-auto"><div class="inline-flex items-center gap-2 bg-white/90 rounded-full pl-1.5 pr-3 py-1 text-sm font-semibold text-brand shadow-sm mb-4"><svg viewBox="0 0 24 24" class="w-6 h-6" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6" fill="#0E7C86"/><path d="M10 5h4v5h5v4h-5v5h-4v-5H5v-4h5z" fill="#fff"/></svg>Clinical simulation</div><h1 class="font-serif text-3xl sm:text-4xl font-bold text-brand leading-tight">How would you use GenAI in the next five minutes?</h1><p class="mt-3 text-ink/70">You will see a patient case and a set of clinical tools. We record what you tap and how long you spend on each page.</p>
+ <div class="${card} mt-6"><h2 class="font-serif text-2xl font-bold text-brand">Demographic form</h2><p class="mt-1 text-sm text-ink/70">Thank you for taking part. Please complete this short form before you start. Your answers will be used only for this study. Tick a box or write your answer for each question. <b>You can skip any question you prefer not to answer.</b></p>
+ <div class="mt-5 space-y-5">
+ <label class="block text-sm font-medium">Your code (given by our team)<input id="d_code" autocomplete="off" maxlength="60" class="mt-1 ${inp}"></label>
+ <h3 class="font-serif text-lg font-bold text-brand pt-2 border-t border-mist-deep">About you</h3>
+ <label class="block text-sm font-medium">Your age (years)<input id="d_age" type="number" inputmode="numeric" min="18" max="100" class="mt-1 ${inp} sm:w-40"></label>
+ ${dq('gender','Your gender')}${dq('degree','Your highest medical degree')}
+ <label class="block text-sm font-medium">Your specialty<input id="d_specialty" maxlength="120" class="mt-1 ${inp}"></label>
+ <label class="block text-sm font-medium">Years you have worked as a doctor since completing your MBBS<input id="d_years" type="number" inputmode="numeric" min="0" max="70" class="mt-1 ${inp} sm:w-40"></label>
+ ${dq('designation','Your current designation')}
+ <h3 class="font-serif text-lg font-bold text-brand pt-2 border-t border-mist-deep">Your work</h3>
+ ${dq('patient_setting','Where do you see most of your patients?')}
+ <h3 class="font-serif text-lg font-bold text-brand pt-2 border-t border-mist-deep">AI tools at work</h3>
+ ${dq('ai_allowed','Are doctors allowed to use AI tools (for example, GenAI chat tools) where you work?')}
+ ${dq('ai_use_any','In the past month, how often have you used AI tools for any purpose?')}
+ ${dq('ai_use_clinical','In the past month, how often have you used AI tools for clinical questions?')}
+ </div>
+ <div class="mt-6"><button onclick="register()" class="${btn}">Continue</button></div></div><p class="text-xs text-ink/50 mt-4">${SIM}</p></div>`}
+ else if(p==='tabs'){app.innerHTML=h2('Choose a patient case','Cases B and G run on a 5:00 timer, and the other characters speak up on schedule. Cases C and H have no clock.')+(C.length?`<div class="${grid}">${C.map((x,i)=>`<button data-l="case ${x.L}" onclick="pick(${i})" class="${card} w-full flex items-center gap-4 text-left active:bg-mist"><span class="w-11 h-11 rounded-xl grid place-items-center text-white font-bold shrink-0" style="background:${x.col}">${x.L}</span><span class="flex-1 min-w-0"><b class="block">${esc(x.title)}</b><span class="text-sm text-ink/60 block">${esc(x.patient)}</span></span><span class="font-serif font-bold ${x.clk?'text-brand':'text-ink/40'}">${x.clk?'5 min':'No clock'}</span></button>`).join('')}</div>`:'<p class="text-brand">Could not load static/cases.json.</p>')}
+ else if(p==='video'){app.innerHTML=h2(`Case ${c.L}: ${esc(c.title)}`,esc(c.patient+'. '+c.setting))+`
+ <video id="vid" class="w-full max-w-3xl block rounded-2xl bg-ink aspect-video" controls autoplay playsinline src="/static/videos/${c.L}.mp4" onended="vidDone()" ontimeupdate="if(this.duration&&this.currentTime>=this.duration-0.15)vidDone()" onerror="this.outerHTML='<div class=&quot;rounded-2xl bg-ink text-white aspect-video grid place-items-center text-center p-4 text-sm&quot;>Video not found. Add static/videos/${c.L}.mp4.<button onclick=&quot;startApp()&quot; class=&quot;mt-3 bg-white text-brand rounded-xl px-4 py-2 font-semibold&quot;>Continue</button></div>'"></video>
+`}
+ else if(p==='mode'){app.innerHTML=h2('How would you like to consult?','Choose how you want to handle this patient. You can use the GenAI Clinical Assistant, or consult in the normal way without it.')+`<div class="${grid} max-w-3xl">
+ <button data-l="mode genai" onclick="chooseMode('genai')" class="${card} text-left active:bg-mist border-brand ring-1 ring-brand"><span class="w-12 h-12 rounded-xl bg-brand text-white grid place-items-center text-2xl" aria-hidden="true">✦</span><b class="block font-serif text-xl mt-3">GenAI Consultation</b><span class="block text-sm text-ink/70 mt-1">Use the AI Clinical Assistant: patient complaint, suggested questions, diagnosis and plan, treatment plan and prescription.</span><span class="${btn} mt-4 block text-center">Use GenAI</span></button>
+ <button data-l="mode normal" onclick="chooseMode('normal')" class="${card} text-left active:bg-mist"><span class="w-12 h-12 rounded-xl bg-mist-deep text-brand grid place-items-center text-2xl" aria-hidden="true">✎</span><b class="block font-serif text-xl mt-3">Normal Consultation</b><span class="block text-sm text-ink/70 mt-1">Consult in your usual way, without AI. Note the history, examination, diagnosis, tests and prescription yourself.</span><span class="${ghost} mt-4 block text-center">Normal consultation</span></button></div>`}
+ else if(p==='normal'){const n=S.nc,f=(k,l,r,ph)=>`<label class="block text-sm font-medium mt-3">${l}<textarea rows="${r}" placeholder="${ph||''}" oninput="S.nc.${k}=this.value" class="mt-1 ${inp}">${esc(n[k])}</textarea></label>`;
+ app.innerHTML=h2('Normal consultation','Record your consultation yourself. No AI suggestions are shown.')+`<div class="${card} max-w-2xl mb-3"><b>${esc(c.patient)}</b><p class="text-sm text-ink/70">${esc(c.setting)}</p><p class="text-sm"><b>With:</b> ${esc(c.with)}</p>${c.clk?`<p class="text-sm text-alert font-semibold mt-1">${esc(c.deadline)}</p>`:''}</div>
+ <div class="rounded-2xl p-4 mb-3 max-w-2xl bg-sky-50 border border-sky-300 text-sky-950"><div class="flex flex-wrap items-center justify-between gap-2"><b>Vitals on arrival</b><span class="text-xs font-semibold rounded-full px-2 py-0.5 bg-sky-700 text-white">Given by Nurse</span></div><ul class="grid sm:grid-cols-2 gap-x-6 mt-2 text-sm">${c.vitals.map(v=>`<li>${esc(v)}</li>`).join('')}</ul></div>
+ <div id="sheet" class="${card} max-w-2xl"><label class="block text-sm font-medium">Patient name<input value="${esc(S.name)}" oninput="S.name=this.value" class="mt-1 ${inp}"></label>
+ ${f('hist','Complaint and history',3,'Presenting complaint, history, past illnesses, medicines, allergies')}${f('exam','Examination findings',3)}${f('dx','Diagnosis',2)}${f('inv','Tests advised',2)}${f('med','Medicines (dosage, duration)',3)}${f('adv','Advice and follow-up',3,'Advice, next visit, when to return urgently')}
+ <div class="noprint grid grid-cols-2 gap-3 mt-5"><button data-l="print normal" onclick="print()" class="${ghost}">Print</button><button data-l="save normal consultation" onclick="saveNormal()" class="${btn}">Save to records</button></div>
+ <p class="text-xs text-ink/50 mt-3">${SIM}</p></div>`}
+ else if(p==='complaint'){app.innerHTML=h2('Patient complaint','Choose how to receive the complaint.')+`<div class="${card} mb-4 space-y-1"><div class="flex flex-wrap gap-2 items-center"><b>${esc(c.patient)}</b>${stakes(c)}</div><p class="text-sm text-ink/70">${esc(c.setting)}</p><p class="text-sm"><b>With:</b> ${esc(c.with)}</p>${c.clk?`<p class="text-sm text-alert font-semibold">${esc(c.deadline)}</p>`:''}</div>
+ <div class="grid grid-cols-2 gap-3 max-w-xl"><button data-l="listen option" onclick="S.cm='listen';render()" class="${S.cm==='listen'?btn:ghost+' bg-white'}">Listen to the patient</button><button data-l="read option" onclick="S.cm='read';render()" class="${S.cm==='read'?btn:ghost+' bg-white'}">Read on screen</button></div>
+ ${S.cm==='listen'?`<div class="${card} mt-4 max-w-xl"><p class="text-sm text-ink/70">Plays static/audio/${c.L}.mp3 if present, otherwise a computer voice reads each speaker’s opening line.</p><div class="grid grid-cols-2 gap-3 mt-3"><button data-l="play complaint" onclick="listen()" class="${btn}">Play</button><button data-l="stop complaint" onclick="speechSynthesis.cancel();S.aud&&S.aud.pause()" class="${ghost}">Stop</button></div></div>`:''}
+ ${S.cm==='read'?`<div class="${card} mt-4 max-w-xl space-y-3">${c.opening.map(o=>`<p><b class="text-brand">${esc(o.s)}</b><span class="block font-serif text-xl leading-snug">“${esc(o.l)}”</span></p>`).join('')}</div>`:''}
+ ${S.cm?`<div class="${card} mt-4 max-w-xl border-brand"><p class="text-sm font-semibold text-brand">The patient and family are asking for</p><ul class="list-disc pl-5 mt-1">${c.req.map(r=>`<li>${esc(r)}</li>`).join('')}</ul></div>`:''}`}
+ else if(p==='record'){app.innerHTML=h2('Listen, transcribe and record','Record the conversation. Speech is transcribed automatically as you talk, with a time stamp and speaker on each line. Live transcription works in Chrome, Edge and Safari; the audio is recorded in any browser with a microphone.')+`
+ <div class="${card} max-w-3xl"><div class="flex flex-wrap items-center gap-4"><button data-l="${S.recOn?'stop recording':'start recording'}" aria-label="${S.recOn?'Stop recording':(S.seg.length||S.audioUrl?'Resume recording':'Start recording')}" title="${S.recOn?'Tap to stop':'Tap to record'}" onclick="${S.recOn?'recStop()':'recStart()'}" class="w-20 h-20 shrink-0 rounded-full bg-brand text-white grid place-items-center shadow-md active:bg-brand-dark ${S.recOn?'!bg-alert animate-pulse ring-8 ring-alert/25':''}"><svg viewBox="0 0 24 24" class="w-9 h-9" fill="currentColor" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg></button>${S.recOn?`<span class="text-alert font-semibold">● Recording <span id="rtm" class="tabular-nums">0:00</span><span class="block text-xs text-ink/60 font-normal">Tap the microphone to stop</span></span>`:`<span class="text-sm text-ink/60">${S.seg.length||S.audioUrl?'Tap the microphone to resume':'Tap the microphone to start'}</span>`}</div>
+ <div id="seg" class="mt-4 space-y-2"></div>
+ <div class="flex flex-wrap gap-3 mt-3"><button data-l="add transcript line" onclick="S.seg.push({t:Date.now()-(S.rt0||Date.now()),who:S.who,text:''});drawSeg();log('transcript_line_added')" class="text-brand text-sm font-semibold">+ Add a line by hand</button><button data-l="copy transcript" onclick="navigator.clipboard.writeText(trText()).then(()=>toast('Transcript copied'))" class="text-brand text-sm font-semibold">Copy transcript</button></div>
+ ${S.audioUrl?`<audio controls src="${S.audioUrl}" class="w-full mt-4"></audio><a download="consultation-${c.L}.webm" href="${S.audioUrl}" class="text-sm text-brand font-semibold inline-block mt-2">Download recording</a>`:''}
+ <p class="text-xs text-ink/50 mt-4">The transcript is saved with the record when you save the prescription.</p></div>`;drawSeg()}
+ else if(p==='questions'){app.innerHTML=h2('Questions to ask','Suggested from this patient’s symptoms. Tick each one as you ask it, or ask a question below to hear the answer.')+`<div class="${grid}">${c.sq.map((t,i)=>`<label class="${card} flex gap-3 cursor-pointer"><input type="checkbox" class="${chk}" ${S.asked['q'+i]?'checked':''} onchange="S.asked['q${i}']=this.checked;log('question_asked',this.checked?'${i}':'undo ${i}')"><span class="font-medium">${esc(t)}</span></label>`).join('')}</div>
+ ${h3('Ask the patient')}<div class="${grid}">${c.dq.map((d,i)=>revealRow('d'+i,d.ask,d.ans,d.why,'Ask this')).join('')}</div>
+ ${h3('The patient and family ask you')}<div class="${grid}">${c.pq.map((d,i)=>revealRow('p'+i,d.by+': '+d.q,d.a,'','Show model response')).join('')}</div>
+ ${h3('If you…')}<div class="${grid}">${c.push.map(d=>`<div class="${card}"><p class="text-sm text-ink/60">If you ${esc(d.when)}</p><p class="mt-1"><b>${esc(d.s)}:</b> ${esc(d.l)}</p></div>`).join('')}</div>`}
+ else if(p==='dxrec'){app.innerHTML=dxPage()}
+ else if(p==='plan'){app.innerHTML=h2('Treatment plan','Everything you ticked or wrote on the Diagnosis & Plan page. Edit or remove lines.')+PKEYS.map(k=>`<section class="mb-5"><h3 class="font-serif text-xl font-bold mb-2">${PCAT[k]}</h3><div class="space-y-2">${S.plan.map((x,i)=>x.c!==k?'':`<div class="flex gap-2 items-start"><div class="flex-1 min-w-0"><textarea rows="2" oninput="S.plan[${i}].t=this.value" onchange="log('plan_edit',this.value.slice(0,40))" class="${inp}">${esc(x.t)}</textarea><span class="sm:hidden text-xs text-ink/50">${srcLbl(x.src)}</span></div><span class="hidden sm:block text-xs text-ink/50 pt-3 w-20">${srcLbl(x.src)}</span><button data-l="remove line" aria-label="Remove line" onclick="S.plan.splice(${i},1);render()" class="text-alert text-2xl px-1">×</button></div>`).join('')||'<p class="text-sm text-ink/50">Nothing yet. Add items on the Diagnosis & Plan page.</p>'}</div><button data-l="add line ${k}" onclick="addLine('${k}')" class="text-brand text-sm font-semibold mt-2">+ Add a line</button></section>`).join('')+`<button onclick="go('rx')" class="${btn} max-w-xs">Prepare prescription</button>`}
+ else if(p==='records'){app.innerHTML=h2('Previous patient records')+`<div class="${card} border-brand max-w-2xl"><p class="font-medium">${NOREC}</p></div><div class="${grid} mt-4 max-w-2xl">${['Previous consultations','Medical history','Medicines','Allergies','Test results'].map(t=>`<div class="${card}"><b>${t}</b><p class="text-sm text-ink/50 mt-1">Not available</p></div>`).join('')}</div>
+ ${h3('Saved in this simulation')}<div id="rec" class="${grid} text-sm text-ink/60">Loading…</div>`;loadRecs()}
+ else if(p==='trends'){const g={};c.sim.forEach(r=>(g[r.p]=g[r.p]||[]).push(r.v));
+ app.innerHTML=h2('Medical trends: '+esc(c.title),'Simulated reference data invented for the platform. Not real statistics and not for clinical use.')+Object.entries(g).map(([k,v],i)=>`${h3(esc(k),i?'mt-6':'')}<div class="space-y-3">${v.map(t=>`<div class="${card}"><p class="font-medium">${esc(t)}</p></div>`).join('')}</div>`).join('')}
+ else if(p==='rx'){const ap=S.appr;app.innerHTML=h2('Prescription','Review and approve before printing.')+`
+ <div id="sheet" class="${card} max-w-2xl"><div class="flex justify-between items-start gap-3"><div><h3 class="font-serif text-xl font-bold text-brand">Prescription</h3><p class="text-sm text-ink/60">${esc(S.who0)} · ${new Date().toLocaleDateString()}</p></div>${ap?'':'<span class="text-xs font-semibold text-alert border border-alert rounded px-2 py-1">DRAFT: not approved</span>'}</div>
+ <label class="block text-sm font-medium mt-3">Patient name<input value="${esc(S.name)}" oninput="S.name=this.value" class="mt-1 ${inp}"></label><p class="text-sm text-ink/60 mt-1">${esc(c.patient)}</p>
+ ${RXL.map(([k,t])=>`<h4 class="font-semibold mt-4">${t}</h4><ul class="list-disc pl-5 text-sm mt-1">${rxLines(k).map(x=>`<li>${esc(x)}</li>`).join('')||'<li class="list-none -ml-5 text-ink/50">None selected</li>'}</ul>`).join('')}
+ <h4 class="font-semibold mt-4">Next visit</h4><p class="text-sm">${esc(S.fp.lbl?S.fp.lbl+' ('+nextDate()+')':'Not set')}. ${esc(S.fp.w||'')}</p>
+ ${S.fp.u?`<h4 class="font-semibold mt-3">Come back urgently if</h4><ul class="list-disc pl-5 text-sm">${S.fp.u.split('\n').filter(Boolean).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
+ <p class="text-xs text-ink/50 mt-4">${ap?'Approved by '+esc(S.who0):'Valid only after doctor approval.'} ${SIM}</p>
+ <label class="noprint flex gap-2 items-center mt-4 font-medium"><input type="checkbox" class="w-5 h-5 accent-[#0E7C86]" ${ap?'checked':''} onchange="S.appr=this.checked;log('rx_approve',String(this.checked));render()">I have reviewed and approve this prescription</label>
+ <div class="noprint grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4"><button data-l="print" ${ap?'':'disabled'} onclick="print()" class="${ghost} disabled:opacity-40">Print</button><button data-l="download pdf" onclick="dlRx()" class="${ghost}">Download PDF</button><button data-l="save record" onclick="saveRec()" class="${btn}">Save to records</button></div></div>`}
+ else if(p==='fu'){const f=S.fp;app.innerHTML=h2('Follow-up plan','Plan for the next consultation. Prefilled for this case; edit as needed.')+`<div class="${card} max-w-2xl"><p class="text-sm font-semibold">Next consultation</p><div class="flex flex-wrap gap-2 mt-2">${[['24 hours',1],['48 hours',2],['1 week',7],['2 weeks',14],['1 month',30]].map(([l,d])=>`<button data-l="fu ${l}" onclick="S.fp.lbl='${l}';S.fp.days=${d};render()" class="px-3 py-2 rounded-xl text-sm font-semibold ${f.days===d?'bg-brand text-white':'border border-brand text-brand'}">${l}</button>`).join('')}</div>${f.days?`<p class="mt-2 text-sm">Around <b>${nextDate()}</b></p>`:''}
+ <label class="block text-sm font-medium mt-4">When and why to return<textarea rows="2" oninput="S.fp.w=this.value" class="mt-1 ${inp}">${esc(f.w)}</textarea></label>
+ <label class="block text-sm font-medium mt-3">What to monitor (one per line)<textarea rows="3" oninput="S.fp.m=this.value" class="mt-1 ${inp}">${esc(f.m)}</textarea></label>
+ <label class="block text-sm font-medium mt-3">Warning signs that need urgent care<textarea rows="3" oninput="S.fp.u=this.value" class="mt-1 ${inp}">${esc(f.u)}</textarea></label>
+ <button onclick="go('rx')" class="${btn} mt-4">Add to prescription</button></div>`}
+ if(inApp)app.insertAdjacentHTML('beforeend',`<p class="noprint text-xs text-ink/50 mt-10">${SIM}</p>`);
+ $('nav').innerHTML=NAV.map(n=>{const on=p===n[0];return `<button data-l="nav:${n[1]}" ${on?'aria-current="page"':''} onclick="go('${n[0]}')" class="shrink-0 whitespace-nowrap px-3 sm:px-4 py-3 rounded-t-xl transition-colors ${on?'bg-mist text-brand font-semibold':'text-white/90 hover:bg-white/10'}">${n[1]}</button>`}).join('');
+ const nv=$('nav'),on=nv.querySelector('[aria-current]');if(on)nv.scrollTo({left:on.offsetLeft-(nv.clientWidth-on.offsetWidth)/2});
+ renderFab()
+}
+function ordT(i){const r=S.c.results[i];S.ord[S.c.L+i]=1;if(!inPlan('tst',r.t)){S.plan.push({c:'tst',t:r.t,src:'global'})}log('order_test',r.t.slice(0,50));render()}
+/* ---- prescription cart (floating button + panel) and PDF ---- */
+const RXL=[['asm','Patient assessment'],['mnm','Must not miss'],['dx','Diagnosis'],['med','Medicines (dosage, duration)'],['tst','Tests'],['fu','Advice and follow-up']];
+const RXN=()=>S.plan.filter(p=>p.t&&p.t.trim()&&PKEYS.includes(p.c)).length;
+function cartToggle(o){S.cart=o===undefined?!S.cart:o;log(S.cart?'rx_panel_open':'rx_panel_close');renderFab()}
+function cartRm(i){const p=S.plan[i];if(!p)return;log('remove_from_plan',(p.t||'').slice(0,40));S.plan.splice(i,1);render()}
+function renderFab(){
+ const root=$('rxfab'),c=S.c;if(!root)return;
+ if(!c||!NAV.some(n=>n[0]===S.page)){root.innerHTML='';return}
+ const n=RXN(),pop=n>(S.lastN||0);S.lastN=n;
+ const fab=`<button data-l="prescription cart" aria-label="Prescription sheet, ${n} item${n===1?'':'s'}" aria-expanded="${!!S.cart}" onclick="cartToggle()" class="noprint fixed z-40 right-4 sm:right-6 w-14 h-14 rounded-full bg-brand text-white shadow-lg ring-4 ring-white/70 grid place-items-center active:bg-brand-dark hover:bg-brand-dark transition-colors ${pop?'pop':''}" style="bottom:max(1rem,env(safe-area-inset-bottom))"><svg viewBox="0 0 24 24" class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M12 9v6M9 12h6"/></svg>${n?`<span class="absolute -top-1 -right-1 min-w-[1.4rem] h-[1.4rem] px-1 rounded-full bg-alert text-white text-xs font-bold grid place-items-center">${n}</span>`:''}</button>`;
+ let panel='';
+ if(S.cart){
+  const ap=S.appr,vit=(c.vitals||[]).map(v=>`<li class="text-xs bg-sky-50 border border-sky-200 text-sky-950 rounded-full px-2 py-0.5">${esc(v)}</li>`).join('');
+  const body=RXL.map(([k,t])=>{const rows=S.plan.map((p,i)=>p.c===k&&p.t&&p.t.trim()?`<li class="flex gap-2 items-start text-sm py-1.5 border-b border-mist-deep last:border-0"><span class="flex-1 min-w-0 break-words">${esc(p.t)}</span><button data-l="remove from prescription" aria-label="Remove ${esc(p.t.slice(0,40))}" onclick="cartRm(${i})" class="shrink-0 text-alert text-xl leading-none px-1.5 -mt-0.5">×</button></li>`:'').join('');
+   return `<div class="mt-3"><h4 class="text-xs font-bold uppercase tracking-wide text-brand">${t}</h4>${rows?`<ul>${rows}</ul>`:'<p class="text-sm text-ink/40">None selected</p>'}</div>`}).join('');
+  panel=`<div class="noprint fixed inset-0 z-40 bg-ink/40 sm:bg-transparent" onclick="cartToggle(false)"></div>
+  <aside role="dialog" aria-modal="true" aria-label="Patient summary and prescription" class="noprint fixed z-50 inset-x-0 bottom-0 sm:inset-x-auto sm:right-6 sm:bottom-24 sm:w-[26rem] max-h-[85dvh] sm:max-h-[72vh] flex flex-col bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-mist-deep">
+   <div class="flex items-center justify-between gap-3 px-4 py-3 bg-brand text-white rounded-t-3xl sm:rounded-t-2xl"><div><b class="font-serif text-lg">Prescription sheet</b><span class="block text-xs text-white/80">${n} item${n===1?'':'s'} added</span></div><button data-l="close prescription panel" aria-label="Close" onclick="cartToggle(false)" class="text-3xl leading-none px-2">×</button></div>
+   <div class="overflow-y-auto px-4 pb-3 flex-1">
+    <section class="mt-3"><h4 class="text-xs font-bold uppercase tracking-wide text-brand">Patient summary</h4>
+     <label class="block text-sm font-medium mt-1">Patient name<input value="${esc(S.name)}" oninput="S.name=this.value" class="mt-1 ${inp}" placeholder="Enter patient name"></label>
+     <p class="text-sm font-semibold mt-2">${esc(c.patient)} ${stakes(c)}</p><p class="text-xs text-ink/60">${esc(c.setting)}</p>
+     <p class="text-sm mt-2">${esc(String(c.summary||'').replace(/^Case summary\.\s*/,''))}</p>
+     ${vit?`<ul class="flex flex-wrap gap-1.5 mt-2">${vit}</ul>`:''}</section>
+    <section class="mt-4 border-t border-mist-deep pt-1"><h4 class="text-xs font-bold uppercase tracking-wide text-brand mt-2">Added to prescription</h4>${n?'':'<p class="text-sm text-ink/50 mt-1">Nothing added yet. Tick or write items on the Diagnosis &amp; Plan page and they appear here.</p>'}${body}</section>
+   </div>
+   <div class="px-4 py-3 border-t border-mist-deep bg-mist/60 sm:rounded-b-2xl" style="padding-bottom:max(.75rem,env(safe-area-inset-bottom))">
+    <label class="flex gap-2 items-center text-sm font-medium"><input type="checkbox" class="w-5 h-5 accent-[#0E7C86]" ${ap?'checked':''} onchange="S.appr=this.checked;log('rx_approve',String(this.checked));render()">I have reviewed and approve this prescription</label>
+    <div class="grid grid-cols-2 gap-2 mt-3"><button data-l="view prescription" onclick="S.cart=false;go('rx')" class="${ghost} py-2.5 bg-white">View</button><button data-l="download prescription" onclick="dlRx()" class="${btn} py-2.5">Download PDF</button></div>
+   </div></aside>`}
+ root.innerHTML=fab+panel}
+addEventListener('keydown',e=>{if(e.key==='Escape'&&S.cart)cartToggle(false)});
+
+/* dependency-free PDF writer (A4, Helvetica) */
+const HW=[278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+const W1252={8364:128,8218:130,402:131,8222:132,8230:133,8224:134,8225:135,710:136,8240:137,352:138,8249:139,338:140,381:142,8216:145,8217:146,8220:147,8221:148,8226:149,8211:150,8212:151,732:152,8482:153,353:154,8250:155,339:156,382:158,376:159};
+const toB=str=>Array.from(String(str??'').replace(/\r/g,'').replace(/[\n\t]/g,' ')).map(ch=>{const c=ch.codePointAt(0);if(c<256&&!(c>=128&&c<160))return String.fromCharCode(c);if(c===8377)return 'Rs.';const m=W1252[c];return m?String.fromCharCode(m):(c===160?' ':'?')}).join('');
+function buildPdf(d){
+ const PW=595,PH=842,M=48,CW=PW-2*M,BR='0.055 0.486 0.525',INK='0.07 0.19 0.23',GR='0.45 0.52 0.55',pages=[];let cur,y;
+ const tw=(s,z,b)=>{let w=0;for(const ch of s){const k=ch.charCodeAt(0);w+=(k>=32&&k<=126?HW[k-32]:(k===149?350:556))}return w*z/1000*(b?1.07:1)};
+ const esc=s=>s.replace(/[\\()]/g,'\\$&');
+ const np=()=>{cur=[];pages.push(cur);y=PH-M};
+ const put=(s,x,yy,z,b,col)=>cur.push(`${col||INK} rg BT /${b?'F2':'F1'} ${z} Tf ${x.toFixed(2)} ${yy.toFixed(2)} Td (${esc(s)}) Tj ET`);
+ const wrap=(s,z,b,w)=>{const out=[];let line='';for(const word of s.split(/ +/)){if(!word)continue;const t=line?line+' '+word:word;if(tw(t,z,b)<=w||!line)line=t;else{out.push(line);line=word}}if(line)out.push(line);return out.length?out:['']};
+ const room=h=>{if(y-h<M+28)np()};
+ const para=(s,o={})=>{const z=o.z||10.5,lh=z*1.4,x=o.x||M,w=(o.w||CW)-(x-M);wrap(toB(s),z,o.b,w).forEach(l=>{room(lh);y-=lh;put(l,x,y,z,o.b,o.col)});y-=o.gap||0};
+ const head=s=>{room(40);y-=10;y-=15;put(toB(s),M,y,12,1,BR);y-=5;cur.push(`0.8 0.89 0.91 RG 0.6 w ${M} ${y.toFixed(2)} m ${PW-M} ${y.toFixed(2)} l S`);y-=2};
+ const bullet=(s,col)=>{const z=10.5,lh=z*1.4;wrap(toB(s),z,0,CW-18).forEach((l,i)=>{room(lh);y-=lh;if(!i)put('\x95',M+4,y,z,0,col);put(l,M+18,y,z,0,col)});y-=1};
+ const kv=(k,v)=>{const z=10.5,lh=z*1.4,ls=wrap(toB(v||'-'),z,0,CW-92);ls.forEach((l,i)=>{room(lh);y-=lh;if(!i)put(toB(k),M,y,z,1,GR);put(l,M+92,y,z,0,0)})};
+ np();
+ cur.push(`${BR} rg 0 ${PH-70} ${PW} 70 re f`);
+ put('Prescription',M,PH-40,22,1,'1 1 1');
+ put(toB([d.doctor,d.spec,d.hosp].filter(Boolean).join('  |  ')),M,PH-58,10,0,'1 1 1');
+ const st=d.approved?'APPROVED':'DRAFT - not approved';put(st,PW-M-tw(st,10,1),PH-40,10,1,'1 1 1');
+ y=PH-70-8;
+ head('Patient details');
+ kv('Patient name',d.patient||'____________________');kv('Date',d.date);kv('Case','Case '+d.caseL+': '+d.caseTitle);kv('Presentation',d.presentation);kv('Setting',d.setting);
+ head('Patient summary');
+ para(d.summary,{gap:4});
+ d.vitals.forEach(v=>bullet(v));
+ d.sections.forEach(([t,items])=>{head(t);if(items.length)items.forEach(x=>bullet(x));else para('None selected',{col:GR})});
+ head('Next visit');para(d.next||'Not set');
+ if(d.urgent.length){head('Come back urgently if');d.urgent.forEach(x=>bullet(x))}
+ room(60);y-=18;para(d.approved?'Approved by '+d.doctor:'Valid only after doctor approval.',{b:1});para(d.sim,{z:9,col:GR});
+ const N=pages.length;pages.forEach((p,i)=>{const f=`Page ${i+1} of ${N}`;p.push(`${GR} rg BT /F1 8.5 Tf ${(PW-M-tw(f,8.5)).toFixed(2)} 28 Td (${f}) Tj ET`)});
+ const objs=[];const add=s=>objs.push(s);
+ add('<< /Type /Catalog /Pages 2 0 R >>');
+ add(`<< /Type /Pages /Count ${N} /Kids [${pages.map((_,i)=>`${5+i*2} 0 R`).join(' ')}] >>`);
+ add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+ add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+ pages.forEach((p,i)=>{const cs=p.join('\n');add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${6+i*2} 0 R >>`);add(`<< /Length ${cs.length} >>\nstream\n${cs}\nendstream`)});
+ let out='%PDF-1.4\n',offs=[];objs.forEach((o,i)=>{offs.push(out.length);out+=`${i+1} 0 obj\n${o}\nendobj\n`});
+ const xr=out.length;out+=`xref\n0 ${objs.length+1}\n0000000000 65535 f \n`+offs.map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('')+`trailer\n<< /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${xr}\n%%EOF`;
+ const u=new Uint8Array(out.length);for(let i=0;i<out.length;i++)u[i]=out.charCodeAt(i)&255;return u}
+function rxData(){const c=S.c,f=S.fp||{};
+ return{doctor:S.who0||'',spec:S.spec||'',hosp:S.hosp||'',patient:S.name.trim(),date:new Date().toLocaleDateString([],{day:'numeric',month:'short',year:'numeric'}),caseL:c.L,caseTitle:c.title,presentation:c.patient,setting:c.setting,
+  summary:String(c.summary||'').replace(/^Case summary\.\s*/,''),vitals:c.vitals||[],sections:RXL.map(([k,t])=>[t,rxLines(k).filter(x=>x&&x.trim())]),
+  next:f.lbl?f.lbl+' ('+nextDate()+'). '+(f.w||''):'',urgent:String(f.u||'').split('\n').map(x=>x.trim()).filter(Boolean),approved:!!S.appr,sim:SIM}}
+function dlRx(){try{const u=buildPdf(rxData()),url=URL.createObjectURL(new Blob([u],{type:'application/pdf'})),a=document.createElement('a'),nm=(S.name.trim()||'patient').replace(/[^\w-]+/g,'_');
+ a.href=url;a.download='Prescription_'+nm+'_'+new Date().toISOString().slice(0,10)+'.pdf';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);log('rx_download',nm);toast('Prescription downloaded')}catch(e){console.error(e);toast('Could not create the PDF')}}
+/* ---- listen ---- */
+function speakAll(ls){speechSynthesis.cancel();ls.forEach((o,i)=>{const u=new SpeechSynthesisUtterance(o.l);u.lang='en-IN';u.rate=.95;u.pitch=i?.85:1.15;speechSynthesis.speak(u)})}
+function listen(){log('listen_complaint',S.c.L);S.aud=new Audio('/static/audio/'+S.c.L+'.mp3');S.aud.play().catch(()=>speakAll(S.c.opening))}
+/* ---- record + live transcription ---- */
+const trText=()=>S.seg.filter(s=>s.text.trim()).map(s=>`[${fmt(s.t)}] ${s.who}: ${s.text.trim()}`).join('\n');
+function drawSeg(){const e=$('seg');if(!e)return;
+ e.innerHTML=S.seg.map((s,i)=>`<div class="flex flex-wrap sm:flex-nowrap gap-2 items-start"><span class="text-xs text-ink/50 pt-3 w-9 tabular-nums">${fmt(s.t)}</span><select onchange="S.seg[${i}].who=this.value" class="rounded-xl border border-mist-deep bg-white px-2 py-2 text-sm">${['Doctor','Patient','Attendant'].map(w=>`<option ${w===s.who?'selected':''}>${w}</option>`).join('')}</select><button aria-label="Remove line" onclick="S.seg.splice(${i},1);drawSeg()" class="text-alert text-xl px-1 ml-auto sm:ml-0 sm:order-last">×</button><input value="${esc(s.text)}" oninput="S.seg[${i}].text=this.value" class="${inp} basis-full sm:basis-0 flex-1 min-w-0 order-last sm:order-none"></div>`).join('')
+ +(S.interim?`<p class="text-sm text-ink/50 italic pl-11">${esc(S.who)}: ${esc(S.interim)}…</p>`:'')||`<p class="text-sm text-ink/50">${S.recOn?'Listening…':'The transcript appears here as you speak.'}</p>`}
+async function recStart(){try{const st=await navigator.mediaDevices.getUserMedia({audio:true});S.chunks=[];S.mr=new MediaRecorder(st);S.mr.ondataavailable=e=>S.chunks.push(e.data);
+ S.mr.onstop=()=>{st.getTracks().forEach(t=>t.stop());S.audioUrl=URL.createObjectURL(new Blob(S.chunks,{type:S.mr.mimeType}));render()};S.mr.start();
+ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(SR){S.sr=new SR();S.sr.continuous=true;S.sr.interimResults=true;S.sr.lang='en-IN';
+  S.sr.onresult=e=>{let it='';for(let i=e.resultIndex;i<e.results.length;i++){const r=e.results[i],tx=r[0].transcript.trim();
+    if(r.isFinal){if(tx){S.seg.push({t:Date.now()-S.rt0,who:S.who,text:tx});if(S.auto)S.who=S.who==='Doctor'?'Patient':'Doctor'}}else it+=tx+' '}
+   S.interim=it.trim();drawSeg()};
+  S.sr.onerror=e=>{if(e.error==='not-allowed')toast('Microphone access was blocked')};
+  S.sr.onend=()=>{if(S.recOn)try{S.sr.start()}catch{}};S.sr.start()}else toast('Live transcription is not supported here. Type lines by hand.');
+ S.rt0=S.rt0?Date.now()-(S.last||0):Date.now();S.recOn=true;clearInterval(S.rti);S.rti=setInterval(()=>{S.last=Date.now()-S.rt0;const e=$('rtm');if(e)e.textContent=fmt(S.last)},500);log('record_start');render()}catch{toast('Microphone not available')}}
+function recStop(){S.recOn=false;clearInterval(S.rti);S.interim='';try{S.sr&&S.sr.stop()}catch{}S.mr&&S.mr.state!=='inactive'&&S.mr.stop();log('record_stop',S.seg.length+' lines');render()}
+/* ---- session ---- */
+/* ---- demographic form: every question optional; a skipped question is stored as NULL ---- */
+const FREQ=[['never','Never'],['lt_monthly','Less than once a month'],['monthly','About once a month'],['few_monthly','A few times a month'],['weekly','About once a week'],['few_weekly','A few times a week'],['daily','Every day']];
+const DQ={gender:[['woman','Woman'],['man','Man'],['another','Another gender'],['prefer_not_to_say','Prefer not to say']],
+ degree:[['mbbs','MBBS'],['md_ms_dnb','MD, MS or DNB'],['dm_mch','DM or MCh'],['other','Other:']],
+ designation:[['intern','Intern'],['junior_resident','Junior resident'],['senior_resident','Senior resident'],['consultant','Consultant'],['senior_consultant','Senior consultant'],['other','Other:']],
+ patient_setting:[['opd','OPD or clinic'],['emergency','Emergency'],['ward_icu','Ward or ICU'],['other','Other:']],
+ ai_allowed:[['yes','Yes'],['no','No'],['not_sure','Not sure']],ai_use_any:FREQ,ai_use_clinical:FREQ};
+const DEMO={};
+const chipCls=on=>'dchip rounded-full border px-3 py-1.5 text-sm font-medium '+(on?'bg-brand text-white border-brand':'bg-white text-ink border-mist-deep');
+function dq(k,label){const opts=DQ[k],hasOther=opts.some(o=>o[0]==='other');
+ return `<div role="group" aria-label="${esc(label)}"><p class="text-sm font-medium">${esc(label)} <span class="text-ink/40 font-normal">(optional)</span></p><div id="dq_${k}" class="mt-2 flex flex-wrap gap-2 items-center">${opts.map(([v,l])=>`<button type="button" data-v="${v}" aria-pressed="false" onclick="pickD('${k}','${v}')" class="${chipCls(false)}">${esc(l)}</button>`).join('')}${hasOther?`<input id="d_${k}_other" maxlength="120" oninput="otherD('${k}')" placeholder="Please specify" class="${inp} !w-48 !py-1.5 text-sm">`:''}</div></div>`}
+function paintD(k){document.querySelectorAll('#dq_'+k+' .dchip').forEach(b=>{const on=DEMO[k]===b.dataset.v;b.className=chipCls(on);b.setAttribute('aria-pressed',on)})}
+function pickD(k,v){DEMO[k]=DEMO[k]===v?undefined:v;paintD(k)}   // tap again to un-tick (skip)
+function otherD(k){if($('d_'+k+'_other').value.trim()){DEMO[k]='other';paintD(k)}}
+function readDemo(skipAll){if(skipAll)return{};const t=id=>($(id)?.value||'').trim()||undefined,n=id=>{const x=parseInt($(id)?.value,10);return Number.isFinite(x)?x:undefined};
+ const o={code:t('d_code'),age:n('d_age'),specialty:t('d_specialty'),years_since_mbbs:n('d_years')};
+ for(const k of Object.keys(DQ)){o[k]=DEMO[k];if(DQ[k].some(x=>x[0]==='other'))o[k+'_other']=DEMO[k]==='other'?t('d_'+k+'_other'):undefined}
+ return Object.fromEntries(Object.entries(o).filter(([,v])=>v!==undefined))}
+async function register(skipAll){const body=readDemo(skipAll);
+ if(body.age!==undefined&&(body.age<18||body.age>100))return toast('Age should be between 18 and 100, or leave it blank');
+ if(body.years_since_mbbs!==undefined&&(body.years_since_mbbs<0||body.years_since_mbbs>70))return toast('Years of work should be between 0 and 70, or leave it blank');
+ try{const d=await send('/doctors',body);S.doc=d.id;S.who0=body.code?'Doctor '+body.code:'Doctor';S.spec=body.specialty||'';S.hosp='';S.q.forEach(e=>e.doctor_id=e.doctor_id||d.id);go('tabs')}catch{toast('Could not save. Is the server running, and is this code already used?')}}
+async function pick(i){S.c=C[i];Object.assign(S,{cart:false,lastN:0,plan:[],own:[],step:0,ed:{},ownN:0,seg:[],who:'Doctor',rt0:0,last:0,interim:'',cm:'',asked:{},rev:{},ord:{},open:{},mode:'',nc:{},appr:false,audioUrl:null,name:''});const f=S.c.fu;S.fp={w:f.w,m:f.m.join('\n'),u:f.u.join('\n')};
+ try{const s=await send('/sessions',{doctor_id:S.doc,tab:S.c.L,story:S.c.title,opening:S.c.clk?'Busy':'Quiet',device:matchMedia('(max-width:767px)').matches?'mobile':'desktop',user_agent:navigator.userAgent.slice(0,300),screen:screen.width+'x'+screen.height+' (viewport '+innerWidth+'x'+innerHeight+')'});S.sid=s.id}catch{toast('Session not saved')}
+ S.vd=0;go('video')}
+function vidDone(){if(S.vd)return;S.vd=1;log('video_ended');startApp()}
+function chooseMode(m){S.mode=m;log('consult_mode',m);go(m==='genai'?'complaint':'normal')}
+async function saveNormal(){if(!S.name.trim())return toast('Enter the patient name');const n=S.nc,lines=t=>String(t||'').split('\n').map(x=>x.trim()).filter(Boolean);
+ const items=[...lines(n.dx).map(x=>'Diagnosis: '+x),...lines(n.inv).map(x=>'Test: '+x),...lines(n.med).map(x=>'Medicine: '+x),...lines(n.adv).map(x=>'Advice: '+x)];
+ try{await send('/records',{session_id:S.sid,doctor_id:S.doc,patient_name:S.name,items:items.length?items:['Normal consultation (no items entered)'],notes:S.c.title,payload:{case:S.c.L,mode:'normal',normal:n}});log('record_saved',S.name);toast('Record saved')}catch{toast('Save failed')}}
+function banner(t){const b=$('bn');b.textContent=t;b.classList.remove('hidden');clearTimeout(S.bt);S.bt=setTimeout(()=>b.classList.add('hidden'),14000);log('interjection',t.slice(0,60))}
+function startApp(){const c=S.c;$('who').textContent=S.who0+' · Case '+c.L+' · '+c.title;clearInterval(S.timer);S.tos.forEach(clearTimeout);S.tos=[];$('bn').classList.add('hidden');
+ if(c.clk){S.left=300;tick();S.timer=setInterval(tick,1000);c.clock.forEach(x=>S.tos.push(setTimeout(()=>banner(x.s+': “'+x.l+'”'),Math.round(+x.m/c.mins*300000))))}else $('clk').textContent='';go('mode')}
+function tick(){const m=Math.floor(S.left/60),s=S.left%60;$('clk').textContent=m+':'+String(s).padStart(2,'0');
+ if(S.left<=0){clearInterval(S.timer);log('timer_expired');$('clk').textContent='0:00 · time up'}S.left--}
+async function saveRec(){if(!S.name.trim())return toast('Enter the patient name');
+ const items=[...rxLines('asm').map(x=>'Assessment: '+x),...rxLines('mnm').map(x=>'Must not miss: '+x),...rxLines('dx').map(x=>'Diagnosis: '+x),...rxLines('med').map(x=>'Medicine: '+x),...rxLines('tst').map(x=>'Test: '+x),...rxLines('fu').map(x=>'Advice: '+x)];if(S.fp.lbl)items.push('Next visit: '+S.fp.lbl);
+ try{await send('/records',{session_id:S.sid,doctor_id:S.doc,patient_name:S.name,items,notes:S.c.title,payload:{case:S.c.L,mode:'genai',transcript:trText(),segments:S.seg,plan:S.plan,followup:S.fp,approved:S.appr,asked:S.asked,tests_ordered:Object.keys(S.ord).length}});log('record_saved',S.name);toast('Record saved')}catch{toast('Save failed')}}
+async function loadRecs(){try{const r=await fetch(API+'/records?doctor_id='+S.doc).then(r=>r.json());
+ $('rec').innerHTML=r.length?r.map(x=>`<div class="${card} text-ink"><b>${esc(x.patient_name)}</b><span class="block text-ink/60">${new Date(x.created_at).toLocaleString()} · ${esc(x.notes)}</span><ul class="list-disc pl-5 mt-2">${x.items.map(i=>`<li>${esc(i)}</li>`).join('')}</ul></div>`).join(''):'No records yet. Save a prescription to see it here.'}catch{$('rec').textContent='Could not load records.'}}
+(async()=>{try{const[a,b]=await Promise.all(['cases','followup'].map(n=>fetch('/static/'+n+'.json').then(r=>r.json())));C=Object.values(a);C.forEach((c,i)=>{c.col=COL['ABCDEFGH'.indexOf(c.L)%8];c.fu=b[c.L]})}catch{}go('reg')})();
+</script>
+</body>
+</html>

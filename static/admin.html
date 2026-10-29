@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Admin · Doctor GenAI Simulation</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>
+tailwind.config={theme:{extend:{colors:{red:{DEFAULT:'#0E7C86',dark:'#0A5A62'},beige:{DEFAULT:'#EAF4F6',deep:'#CFE3E8'},ink:'#12303A'},
+fontFamily:{serif:['Fraunces','serif'],sans:['"Instrument Sans"','sans-serif']}}}}
+</script>
+<style>
+.nav{scrollbar-width:none;-webkit-overflow-scrolling:touch}.nav::-webkit-scrollbar{display:none}
+th{position:sticky;top:0;background:#fff}
+</style>
+</head>
+<body class="bg-beige text-ink font-sans min-h-screen">
+
+<!-- Sign-in -->
+<div id="login" class="hidden min-h-screen grid place-items-center px-4">
+  <div class="w-full max-w-sm bg-white rounded-2xl border border-beige-deep p-6">
+    <h1 class="font-serif text-3xl font-bold text-red">Admin sign in</h1>
+    <p class="text-sm text-ink/60 mt-1 mb-4">Doctor GenAI Simulation · research portal</p>
+    <label class="block text-sm font-medium">Password
+      <input id="pw" type="password" autocomplete="current-password" class="mt-1 w-full rounded-xl border border-beige-deep bg-beige/50 px-3 py-3 text-base focus:outline-red"></label>
+    <p id="lerr" class="text-sm text-red mt-2 min-h-[1.25rem]"></p>
+    <button onclick="signIn()" class="mt-2 w-full bg-red text-white rounded-xl px-4 py-3 font-semibold active:bg-red-dark">Sign in</button>
+  </div>
+</div>
+
+<!-- Portal -->
+<div id="portal" class="hidden">
+<header class="sticky top-0 z-20 bg-red text-white shadow-md pt-[env(safe-area-inset-top)]">
+  <div class="mx-auto w-full max-w-7xl px-4 sm:px-6 h-12 flex items-center justify-between gap-3">
+    <span class="font-serif text-lg sm:text-xl font-bold truncate">Doctor GenAI <span class="font-sans font-medium text-white/70 text-sm">· Admin</span></span>
+    <div class="flex items-center gap-1 sm:gap-3 text-sm shrink-0">
+      <label class="flex items-center gap-2 cursor-pointer select-none px-2 py-1 rounded-lg hover:bg-white/10">
+        <span id="dot" class="w-2 h-2 rounded-full bg-white/40"></span>
+        <input id="live" type="checkbox" class="sr-only" onchange="setLive(this.checked)"><span>Live</span></label>
+      <a href="/" target="_blank" class="hidden sm:inline px-2 py-1 rounded-lg hover:bg-white/10">Open app</a>
+      <button onclick="logout()" class="px-2 py-1 rounded-lg hover:bg-white/10">Sign out</button>
+    </div>
+  </div>
+  <div class="bg-red-dark">
+    <nav id="nav" aria-label="Sections" class="nav mx-auto w-full max-w-7xl px-2 sm:px-4 pt-2 flex items-end gap-1 overflow-x-auto md:overflow-visible text-sm md:text-[15px]"></nav>
+  </div>
+</header>
+<main id="view" class="mx-auto w-full max-w-7xl px-4 sm:px-6 py-5 sm:py-8 pb-24"></main>
+</div>
+
+<div id="toast" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 bg-ink text-white text-sm px-4 py-2 rounded-full z-30"></div>
+
+<script>
+/* ---------- state & helpers ---------- */
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const T={token:sessionStorage.getItem('adm')||'',timer:null,cur:null,
+  f:{logs:{page:0,type:'',doc:'',q:''},ses:{doc:'',tab:'',open:''},docs:{q:''},evt:''}};
+const NAV=[['overview','Overview'],['doctors','Doctors'],['sessions','Sessions'],['logs','Activity log'],['records','Records']];
+const TABCOL={A:'#4472C4',B:'#8E5BBE',C:'#DD8A1B',D:'#7A5230',E:'#D4BE12',F:'#5BB5CC',G:'#D45A9B',H:'#5F6B7C'};
+const EV={page_view:['Opened page','bg-blue-100 text-blue-800'],page_time:['Time on page','bg-slate-100 text-slate-700'],
+  click:['Click','bg-amber-100 text-amber-800'],add_to_sheet:['Added to Rx','bg-green-100 text-green-800'],
+  add_all_to_sheet:['Added all to Rx','bg-green-100 text-green-800'],skip_video:['Skipped video','bg-orange-100 text-orange-800'],
+  video_ended:['Video finished','bg-teal-100 text-teal-800'],timer_expired:['Timer expired','bg-red/10 text-red'],
+  record_saved:['Record saved','bg-emerald-100 text-emerald-800'],rx_edit:['Edited Rx line','bg-purple-100 text-purple-800'],
+  tab_hidden:['Left tab','bg-stone-200 text-stone-700'],tab_visible:['Back on tab','bg-stone-100 text-stone-700']};
+const card='bg-white rounded-2xl border border-beige-deep';
+const toast=m=>{const t=$('toast');t.textContent=m;t.classList.remove('hidden');setTimeout(()=>t.classList.add('hidden'),2200)};
+const fmtTime=i=>i?new Date(i).toLocaleString([],{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—';
+const fmtDur=s=>{s=Math.round(+s||0);if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m '+String(s%60).padStart(2,'0')+'s';return Math.floor(s/3600)+'h '+String(Math.floor(s%3600/60)).padStart(2,'0')+'m'};
+const fmtOff=s=>s==null?'—':'+'+Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0');
+const badge=t=>{const e=EV[t]||[t,'bg-stone-100 text-stone-700'];return `<span class="inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${e[1]}">${esc(e[0])}</span>`};
+const chip=t=>t?`<span class="inline-grid place-items-center w-6 h-6 rounded-md text-white text-xs font-bold" style="background:${TABCOL[t]||'#666'}">${esc(t)}</span>`:'';
+const openTag=o=>o==='Busy'?'<span class="text-red font-semibold">Busy</span>':'<span class="text-ink/60">Quiet</span>';
+const tbl=(heads,rows,empty='Nothing here yet.')=>rows.length?`<div class="overflow-auto max-h-[70vh] rounded-2xl border border-beige-deep bg-white"><table class="w-full text-sm text-left"><thead class="text-xs uppercase tracking-wide text-ink/60"><tr>${heads.map(h=>`<th class="px-3 py-2 font-semibold whitespace-nowrap">${h}</th>`).join('')}</tr></thead><tbody class="divide-y divide-beige-deep">${rows.join('')}</tbody></table></div>`:`<div class="${card} p-6 text-sm text-ink/60">${empty}</div>`;
+const td=(v,c='')=>`<td class="px-3 py-2 ${c}">${v}</td>`;
+const kpi=(l,v,sub='')=>`<div class="${card} p-4"><div class="text-xs uppercase tracking-wide text-ink/60">${l}</div><div class="font-serif text-3xl font-bold mt-1">${v}</div>${sub?`<div class="text-xs text-ink/50 mt-1">${sub}</div>`:''}</div>`;
+const sel=(id,opts,val,fn)=>`<select id="${id}" onchange="${fn}" class="rounded-xl border border-beige-deep bg-white px-3 py-2 text-sm">${opts.map(([v,l])=>`<option value="${esc(v)}" ${v===val?'selected':''}>${esc(l)}</option>`).join('')}</select>`;
+const bar=(v,max,c='bg-red')=>`<div class="h-2 rounded-full bg-beige-deep overflow-hidden"><div class="h-full ${c}" style="width:${max?Math.max(2,v/max*100):0}%"></div></div>`;
+
+async function api(path){const r=await fetch('/api/admin'+path,{headers:{Authorization:'Bearer '+T.token}});
+  if(r.status===401){logout(true);throw new Error('auth')}
+  if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.detail||r.statusText)}return r.json()}
+async function download(kind,qs=''){try{const r=await fetch('/api/admin/export/'+kind+qs,{headers:{Authorization:'Bearer '+T.token}});
+  if(!r.ok)throw new Error();const name=(r.headers.get('content-disposition')||'').match(/filename="(.+?)"/);
+  const a=document.createElement('a');a.href=URL.createObjectURL(await r.blob());a.download=name?name[1]:kind+'.csv';a.click();URL.revokeObjectURL(a.href)}
+  catch{toast('Export failed')}}
+const exportBtns=(qs='',kinds=['events','sessions','doctors','records'])=>kinds.map(k=>`<button onclick="download('${k}','${qs}')" class="border border-red text-red rounded-lg px-3 py-1.5 text-sm font-semibold hover:bg-red hover:text-white">Export ${k} CSV</button>`).join('');
+const fail=e=>$('res')&&($('res').innerHTML=`<div class="${card} p-6 text-sm text-red">Could not load data: ${esc(e.message)}</div>`);
+
+/* ---------- auth ---------- */
+function showLogin(){$('portal').classList.add('hidden');$('login').classList.remove('hidden');$('pw').focus()}
+async function signIn(){$('lerr').textContent='';
+  try{const r=await fetch('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:$('pw').value})});
+    const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||'Sign in failed');
+    T.token=j.token;sessionStorage.setItem('adm',T.token);$('pw').value='';boot()}
+  catch(e){$('lerr').textContent=e.message}}
+function logout(expired){sessionStorage.removeItem('adm');T.token='';setLive(false);$('live').checked=false;showLogin();if(expired)$('lerr').textContent='Session expired. Please sign in again.'}
+$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')signIn()});
+
+/* ---------- live refresh ---------- */
+function setLive(on){clearInterval(T.timer);$('dot').className='w-2 h-2 rounded-full '+(on?'bg-green-300 animate-pulse':'bg-white/40');
+  if(on)T.timer=setInterval(()=>{if(!document.hidden&&T.cur&&T.cur.refresh)T.cur.refresh()},8000)}
+
+/* ---------- router ---------- */
+function route(){if(!T.token)return showLogin();
+  const [,name='overview',id]=(location.hash||'#/overview').split('/');
+  const sect={doctor:'doctors',session:'sessions'}[name]||name;
+  $('nav').innerHTML=NAV.map(n=>{const on=n[0]===sect;return `<button ${on?'aria-current="page"':''} onclick="location.hash='#/${n[0]}'" class="shrink-0 md:shrink md:flex-1 md:basis-0 text-center whitespace-nowrap px-4 py-3 rounded-t-xl transition-colors ${on?'bg-beige text-red font-semibold':'text-white/90 hover:bg-white/10'}">${n[1]}</button>`}).join('');
+  const nv=$('nav'),on=nv.querySelector('[aria-current]');if(on)nv.scrollTo({left:on.offsetLeft-(nv.clientWidth-on.offsetWidth)/2});
+  const page=P[name]||P.overview;T.cur={refresh:()=>page.refresh(id)};$('view').innerHTML=page.mount(id);page.refresh(id);scrollTo(0,0)}
+addEventListener('hashchange',()=>T.token&&route());
+function boot(){$('login').classList.add('hidden');$('portal').classList.remove('hidden');
+  api('/me').then(route).catch(e=>{if(e.message!=='auth'){showLogin();$('lerr').textContent=e.message}})}
+
+/* ---------- pages ---------- */
+const title=(t,sub='',right='')=>`<div class="flex flex-wrap items-end justify-between gap-3 mb-4"><div><h2 class="font-serif text-2xl sm:text-3xl font-bold">${t}</h2>${sub?`<p class="text-sm text-ink/60 mt-1">${sub}</p>`:''}</div><div class="flex flex-wrap gap-2">${right}</div></div>`;
+const sessRow=m=>`<tr onclick="location.hash='#/session/${m.id}'" class="cursor-pointer hover:bg-beige/60">${td(esc(fmtTime(m.started_at)),'whitespace-nowrap')}${td(`<b>${esc(m.doctor_name||'—')}</b><div class="text-xs text-ink/50">${esc(m.specialization||'')}</div>`)}${td(chip(m.tab)+' <span class="ml-1">'+esc(m.story)+'</span>','whitespace-nowrap')}${td(openTag(m.opening))}${td(fmtDur(m.duration_seconds),'whitespace-nowrap')}${td(fmtDur(m.active_seconds),'whitespace-nowrap')}${td(m.clicks)}${td(m.items_added)}${td(m.records_saved)}${td(esc(m.device||'—'))}${td(m.event_count)}</tr>`;
+const SESS_HEADS=['Started','Doctor','Scenario','Mode','Duration','Active time','Clicks','Items added','Records','Device','Events'];
+const evRow=(e,showDoc=true)=>`<tr>${td(esc(fmtTime(e.time)),'whitespace-nowrap tabular-nums')}${td(fmtOff(e.offset_seconds),'text-ink/50 tabular-nums whitespace-nowrap')}${showDoc?td(e.doctor_id?`<a class="text-red hover:underline" href="#/doctor/${e.doctor_id}">${esc(e.doctor_name)}</a>`:'<span class="text-ink/40">anonymous</span>'):''}${td(e.session_id?`<a href="#/session/${e.session_id}">${chip(e.tab)}</a>`:'<span class="text-ink/30">—</span>')}${td(esc(e.page||'—'))}${td(badge(e.event_type))}${td(esc(e.label||''),'max-w-xs')}${td(e.duration_ms!=null?fmtDur(e.duration_ms/1000):'','whitespace-nowrap tabular-nums')}</tr>`;
+const EV_HEADS=d=>['Time','Since start',d?'Doctor':'','Tab','Page','Event','Detail','Duration'].filter((h,i)=>d||i!==2);
+
+const P={};
+
+P.overview={mount:()=>title('Overview','Everything doctors have done in the simulation, across all sessions.',exportBtns())+'<div id="res"><p class="text-sm text-ink/60">Loading…</p></div>',
+ async refresh(){try{const o=await api('/overview'),t=o.totals;
+  const maxAvg=Math.max(0,...o.pages.map(p=>p.avg_seconds));
+  const days={};for(let i=13;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);days[d.toDateString()]={d,n:0}}
+  o.session_starts.forEach(s=>{const k=new Date(s).toDateString();if(days[k])days[k].n++});const maxDay=Math.max(1,...Object.values(days).map(x=>x.n));
+  $('res').innerHTML=`<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">${kpi('Doctors',t.doctors)}${kpi('Sessions',t.sessions)}${kpi('Events logged',t.events.toLocaleString())}${kpi('Records saved',t.records)}${kpi('Active now',t.active_now,'activity in last 90s')}${kpi('Avg session',fmtDur(t.avg_duration_seconds))}</div>
+  <h3 class="font-serif text-xl font-bold mt-8 mb-3">Busy vs Quiet</h3>
+  <div class="grid md:grid-cols-2 gap-3">${o.by_opening.map(g=>`<div class="${card} p-4"><div class="flex items-center justify-between"><b class="text-lg">${openTag(g.opening)}</b><span class="text-sm text-ink/60">${g.sessions} sessions · ${g.doctors} doctors</span></div><dl class="grid grid-cols-3 gap-3 mt-3 text-sm"><div><dt class="text-ink/50 text-xs">Avg time</dt><dd class="font-semibold">${fmtDur(g.avg_duration_seconds)}</dd></div><div><dt class="text-ink/50 text-xs">Avg clicks</dt><dd class="font-semibold">${g.avg_clicks}</dd></div><div><dt class="text-ink/50 text-xs">Avg items added</dt><dd class="font-semibold">${g.avg_items_added}</dd></div><div><dt class="text-ink/50 text-xs">Records saved</dt><dd class="font-semibold">${g.records_saved}</dd></div><div><dt class="text-ink/50 text-xs">Videos skipped</dt><dd class="font-semibold">${g.video_skipped}</dd></div><div><dt class="text-ink/50 text-xs">Timer ran out</dt><dd class="font-semibold">${g.timer_expired}</dd></div></dl></div>`).join('')||`<div class="${card} p-6 text-sm text-ink/60">No sessions yet.</div>`}</div>
+  <h3 class="font-serif text-xl font-bold mt-8 mb-3">By scenario</h3>
+  ${tbl(['Tab','Scenario','Mode','Sessions','Doctors','Avg time','Avg active','Avg clicks','Avg items added','Records','Videos skipped','Timer ran out'],o.by_tab.map(g=>`<tr>${td(chip(g.tab))}${td(esc(g.story))}${td(openTag(g.opening))}${td(g.sessions)}${td(g.doctors)}${td(fmtDur(g.avg_duration_seconds),'whitespace-nowrap')}${td(fmtDur(g.avg_active_seconds),'whitespace-nowrap')}${td(g.avg_clicks)}${td(g.avg_items_added)}${td(g.records_saved)}${td(g.video_skipped)}${td(g.timer_expired)}</tr>`))}
+  <div class="grid lg:grid-cols-2 gap-6 mt-8"><div><h3 class="font-serif text-xl font-bold mb-3">Time on each page</h3><div class="${card} p-4 space-y-3">${o.pages.length?o.pages.sort((a,b)=>b.avg_seconds-a.avg_seconds).map(p=>`<div><div class="flex justify-between text-sm"><b>${esc(p.page)}</b><span class="text-ink/60">avg ${fmtDur(p.avg_seconds)} · ${p.views} views · ${p.clicks} clicks</span></div>${bar(p.avg_seconds,maxAvg)}</div>`).join(''):'<p class="text-sm text-ink/60">No data yet.</p>'}</div></div>
+  <div><h3 class="font-serif text-xl font-bold mb-3">Sessions, last 14 days</h3><div class="${card} p-4"><div class="flex items-end gap-1 h-32">${Object.values(days).map(x=>`<div class="flex-1 flex flex-col justify-end items-center h-full" title="${x.d.toDateString()}: ${x.n}"><div class="w-full bg-red rounded-t" style="height:${x.n/maxDay*100}%;min-height:${x.n?'3px':'0'}"></div></div>`).join('')}</div><div class="flex justify-between text-xs text-ink/50 mt-2"><span>${Object.values(days)[0].d.toLocaleDateString([],{day:'numeric',month:'short'})}</span><span>Today</span></div></div>
+  <h3 class="font-serif text-xl font-bold mt-6 mb-3">Event types</h3><div class="flex flex-wrap gap-2">${Object.entries(o.event_types).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<span class="${card} px-3 py-1.5 text-sm flex items-center gap-2">${badge(k)}<b>${v}</b></span>`).join('')||'<span class="text-sm text-ink/60">None yet.</span>'}</div></div></div>
+  <h3 class="font-serif text-xl font-bold mt-8 mb-3">Latest activity</h3>${tbl(EV_HEADS(true),o.latest_events.map(e=>evRow(e)),'No activity yet.')}`}catch(e){fail(e)}}};
+
+P.doctors={mount:()=>title('Doctors','Everyone who has registered.',exportBtns('',['doctors']))+`<input id="dq" value="${esc(T.f.docs.q)}" oninput="T.f.docs.q=this.value;T.cur.refresh()" placeholder="Search code, specialty or designation" class="w-full sm:max-w-sm mb-4 rounded-xl border border-beige-deep bg-white px-3 py-2 text-sm"><div id="res"><p class="text-sm text-ink/60">Loading…</p></div>`,
+ async refresh(){try{const q=T.f.docs.q.toLowerCase();const r=(await api('/doctors')).filter(d=>!q||[d.name,d.specialty,d.designation].join(' ').toLowerCase().includes(q));
+  $('res').innerHTML=tbl(['Code','Specialty','Designation','Age','Sessions','Events','Records','Active time','Registered','Last active'],r.map(d=>`<tr onclick="location.hash='#/doctor/${d.id}'" class="cursor-pointer hover:bg-beige/60">${td(`<b>${esc(d.name)}</b>`)}${td(esc(d.specialty||'—'))}${td(esc(LBL[d.designation]||d.designation||'—'))}${td(d.age??'—')}${td(d.sessions)}${td(d.events)}${td(d.records)}${td(fmtDur(d.active_seconds),'whitespace-nowrap')}${td(esc(fmtTime(d.created_at)),'whitespace-nowrap')}${td(esc(fmtTime(d.last_active)),'whitespace-nowrap')}</tr>`),'No doctors match.')}catch(e){fail(e)}}};
+
+P.doctor={mount:id=>`<a href="#/doctors" class="text-sm text-red font-semibold">← All doctors</a><div id="res" class="mt-3"><p class="text-sm text-ink/60">Loading…</p></div>`,
+ async refresh(id){try{const x=await api('/doctors/'+id),d=x.doctor;
+  const act=x.sessions.reduce((a,m)=>a+m.active_seconds,0);
+  $('res').innerHTML=title(esc(d.code||d.name||'Anonymous'),`${esc(d.specialty||'specialty skipped')} · registered ${esc(fmtTime(d.created_at))}`,exportBtns('?doctor_id='+id,['events','sessions']))+
+  demoCard(d)+`<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">${kpi('Sessions',x.sessions.length)}${kpi('Events',x.events.length)}${kpi('Active time',fmtDur(act))}${kpi('Records saved',x.records.length)}</div>
+  <h3 class="font-serif text-xl font-bold mt-8 mb-3">Sessions</h3>${tbl(SESS_HEADS,x.sessions.map(sessRow),'No sessions yet.')}
+  <h3 class="font-serif text-xl font-bold mt-8 mb-3">Prescriptions saved</h3>${recCards(x.records.map(r=>({...r,doctor_name:d.name})))}
+  <h3 class="font-serif text-xl font-bold mt-8 mb-3">Full activity timeline <span class="text-sm font-sans font-normal text-ink/50">(${x.events.length} events)</span></h3>${tbl(EV_HEADS(false),x.events.map(e=>evRow(e,false)),'No activity yet.')}`}catch(e){fail(e)}}};
+
+P.sessions={mount:()=>title('Sessions','One row per scenario a doctor played. Click a row for the full log.',exportBtns('',['sessions']))+`<div class="flex flex-wrap gap-2 mb-4"><div id="fdoc"></div>${sel('ftab',[['','All tabs'],...Object.keys(TABCOL).map(t=>[t,'Tab '+t])],T.f.ses.tab,"T.f.ses.tab=this.value;T.cur.refresh()")}${sel('fopen',[['','Busy & Quiet'],['Busy','Busy'],['Quiet','Quiet']],T.f.ses.open,"T.f.ses.open=this.value;T.cur.refresh()")}</div><div id="res"><p class="text-sm text-ink/60">Loading…</p></div>`,
+ async refresh(){try{const f=T.f.ses,qs=new URLSearchParams({...(f.doc&&{doctor_id:f.doc}),...(f.tab&&{tab:f.tab}),...(f.open&&{opening:f.open})}).toString();
+  const [r,docs]=await Promise.all([api('/sessions'+(qs?'?'+qs:'')),api('/doctors')]);
+  $('fdoc').innerHTML=sel('fd',[['','All doctors'],...docs.map(d=>[d.id,d.name])],f.doc,"T.f.ses.doc=this.value;T.cur.refresh()");
+  $('res').innerHTML=tbl(SESS_HEADS,r.map(sessRow),'No sessions match.')}catch(e){fail(e)}}};
+
+P.session={mount:()=>`<a href="#/sessions" class="text-sm text-red font-semibold">← All sessions</a><div id="res" class="mt-3"><p class="text-sm text-ink/60">Loading…</p></div>`,
+ async refresh(id){try{const x=await api('/sessions/'+id),s=x.session,mx=Math.max(1,...x.journey.map(j=>j.seconds));
+  const evs=x.events.filter(e=>!T.f.evt||e.event_type===T.f.evt);const types=[...new Set(x.events.map(e=>e.event_type))];
+  $('res').innerHTML=title(`${chip(s.tab)} ${esc(s.story)} · ${openTag(s.opening)}`,`<a class="text-red font-semibold hover:underline" href="#/doctor/${s.doctor_id}">${esc(s.doctor_name)}</a> · ${esc(s.specialization||'')}<br>Started ${esc(fmtTime(s.started_at))} · ${esc(s.device||'device unknown')} ${esc(s.screen||'')}`,exportBtns('?session_id='+id,['events']))+
+  `<div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">${kpi('Duration',fmtDur(s.duration_seconds))}${kpi('Active time',fmtDur(s.active_seconds))}${kpi('Events',s.event_count)}${kpi('Clicks',s.clicks)}${kpi('Items added',s.items_added)}${kpi('Records',s.records_saved)}${kpi('Video',s.video_completed?'Watched':s.video_skipped?'Skipped':'—')}${kpi('Timer',s.opening==='Busy'?(s.timer_expired?'Ran out':'Beat it'):'None')}</div>
+  <div class="grid lg:grid-cols-2 gap-6 mt-8"><div><h3 class="font-serif text-xl font-bold mb-3">Page journey</h3><div class="${card} p-4 space-y-3">${x.journey.map((j,i)=>`<div><div class="flex justify-between text-sm"><span><span class="text-ink/40">${i+1}.</span> <b>${esc(j.page)}</b></span><span class="text-ink/60">${fmtDur(j.seconds)} · ${j.clicks} clicks${j.views>1?' · visited '+j.views+'×':''}</span></div>${bar(j.seconds,mx)}</div>`).join('')||'<p class="text-sm text-ink/60">No pages yet.</p>'}</div></div>
+  <div><h3 class="font-serif text-xl font-bold mb-3">Added to prescription sheet</h3><div class="${card} p-4"><ul class="list-disc pl-5 text-sm space-y-1">${x.added_items.map(a=>`<li>${esc(a)}</li>`).join('')||'<li class="list-none -ml-5 text-ink/60">Nothing added.</li>'}</ul></div>
+  <h3 class="font-serif text-xl font-bold mt-6 mb-3">Records saved</h3>${recCards(x.records.map(r=>({...r,doctor_name:s.doctor_name})))}</div></div>
+  <div class="flex flex-wrap items-end justify-between gap-3 mt-8 mb-3"><h3 class="font-serif text-xl font-bold">Event log <span class="text-sm font-sans font-normal text-ink/50">(${evs.length} of ${x.events.length})</span></h3>${sel('fe',[['','All event types'],...types.map(t=>[t,(EV[t]||[t])[0]])],T.f.evt,"T.f.evt=this.value;T.cur.refresh()")}</div>
+  ${tbl(EV_HEADS(false),evs.map(e=>evRow(e,false)),'No events.')}`}catch(e){fail(e)}}};
+
+P.logs={mount:()=>title('Activity log','Every logged action, newest first. Times are shown in your local timezone.',exportBtns('',['events']))+`<div class="flex flex-wrap gap-2 mb-4"><div id="fdoc"></div>${sel('ft',[['','All event types'],...Object.entries(EV).map(([k,v])=>[k,v[0]])],T.f.logs.type,"T.f.logs.type=this.value;T.f.logs.page=0;T.cur.refresh()")}<input id="fq" value="${esc(T.f.logs.q)}" oninput="clearTimeout(T.qd);T.qd=setTimeout(()=>{T.f.logs.q=$('fq').value;T.f.logs.page=0;T.cur.refresh()},300)" placeholder="Search label, page, doctor…" class="flex-1 min-w-[12rem] sm:max-w-xs rounded-xl border border-beige-deep bg-white px-3 py-2 text-sm"></div><div id="res"><p class="text-sm text-ink/60">Loading…</p></div>`,
+ async refresh(){try{const f=T.f.logs,N=50;
+  const qs=new URLSearchParams({limit:N,offset:f.page*N,...(f.doc&&{doctor_id:f.doc}),...(f.type&&{event_type:f.type}),...(f.q&&{q:f.q})});
+  const [r,docs]=await Promise.all([api('/events?'+qs),api('/doctors')]);
+  $('fdoc').innerHTML=sel('fd',[['','All doctors'],...docs.map(d=>[d.id,d.name])],f.doc,"T.f.logs.doc=this.value;T.f.logs.page=0;T.cur.refresh()");
+  const pages=Math.max(1,Math.ceil(r.total/N));
+  $('res').innerHTML=tbl(EV_HEADS(true),r.rows.map(e=>evRow(e)),'No events match.')+`<div class="flex items-center justify-between mt-3 text-sm"><span class="text-ink/60">${r.total.toLocaleString()} events · page ${f.page+1} of ${pages}</span><div class="flex gap-2"><button ${f.page?'':'disabled'} onclick="T.f.logs.page--;T.cur.refresh()" class="border border-red text-red rounded-lg px-3 py-1.5 font-semibold disabled:opacity-30">Previous</button><button ${f.page+1<pages?'':'disabled'} onclick="T.f.logs.page++;T.cur.refresh()" class="border border-red text-red rounded-lg px-3 py-1.5 font-semibold disabled:opacity-30">Next</button></div></div>`}catch(e){fail(e)}}};
+
+const LBL={woman:'Woman',man:'Man',another:'Another gender',prefer_not_to_say:'Prefer not to say',mbbs:'MBBS',md_ms_dnb:'MD, MS or DNB',dm_mch:'DM or MCh',other:'Other',intern:'Intern',junior_resident:'Junior resident',senior_resident:'Senior resident',consultant:'Consultant',senior_consultant:'Senior consultant',opd:'OPD or clinic',emergency:'Emergency',ward_icu:'Ward or ICU',yes:'Yes',no:'No',not_sure:'Not sure',never:'Never',lt_monthly:'Less than once a month',monthly:'About once a month',few_monthly:'A few times a month',weekly:'About once a week',few_weekly:'A few times a week',daily:'Every day'};
+function demoCard(d){const v=(k,o)=>{const x=d[k];if(x==null||x==='')return '<span class="text-ink/40">skipped</span>';return esc((LBL[x]||x)+(x==='other'&&o&&d[o]?': '+d[o]:''))};
+ const rows=[['Code',v('code')],['Age',v('age')],['Gender',v('gender')],['Highest degree',v('degree','degree_other')],['Specialty',v('specialty')],['Years since MBBS',v('years_since_mbbs')],['Designation',v('designation','designation_other')],['Sees most patients in',v('patient_setting','patient_setting_other')],['AI allowed at work',v('ai_allowed')],['AI use, past month (any)',v('ai_use_any')],['AI use, past month (clinical)',v('ai_use_clinical')]];
+ return `<div class="${card} p-4"><h3 class="font-serif text-lg font-bold mb-2">Demographic form</h3><dl class="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-sm">${rows.map(([k,x])=>`<div><dt class="text-ink/50 text-xs">${k}</dt><dd class="font-medium">${x}</dd></div>`).join('')}</dl></div>`}
+function recCards(rs){return rs.length?`<div class="grid md:grid-cols-2 gap-3">${rs.map(r=>`<div class="${card} p-4 text-sm"><div class="flex justify-between gap-2"><b>${esc(r.patient_name)}</b><span class="text-ink/50 whitespace-nowrap">${esc(fmtTime(r.created_at))}</span></div><div class="text-ink/60 mt-0.5">${esc(r.doctor_name||'')}${r.tab?' · '+chip(r.tab)+' '+esc(r.story||''):' · '+esc(r.notes||'')}</div><ul class="list-disc pl-5 mt-2 space-y-0.5">${(r.items||[]).map(i=>`<li>${esc(i)}</li>`).join('')||'<li class="list-none -ml-5 text-ink/50">Empty sheet</li>'}</ul></div>`).join('')}</div>`:`<div class="${card} p-6 text-sm text-ink/60">No records saved yet.</div>`}
+P.records={mount:()=>title('Records','Prescription sheets doctors saved.',exportBtns('',['records']))+'<div id="res"><p class="text-sm text-ink/60">Loading…</p></div>',
+ async refresh(){try{$('res').innerHTML=recCards(await api('/records'))}catch(e){fail(e)}}};
+
+if(T.token)boot();else showLogin();
+</script>
+</body>
+</html>

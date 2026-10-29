@@ -1,0 +1,51 @@
+{
+"B": {
+"w": "Admit for observation and IV treatment. Explain to the parents why leaving is unsafe.",
+"m": [
+"Temperature, feeding and urine output",
+"Breathing and alertness"
+],
+"u": [
+"Refuses feeds, very sleepy or floppy",
+"Fast breathing, seizure or blue colour",
+"Temperature below 36.5°C or above 38°C"
+]
+},
+"C": {
+"w": "Admit for monitoring with orthopaedic and vascular review. If cleared, wound check in 48 hours.",
+"m": [
+"Urine colour and output",
+"Leg pulses, colour, sensation and swelling",
+"Potassium, creatinine and CK"
+],
+"u": [
+"Severe or rising leg pain, tense swelling",
+"Numb, pale or cold foot",
+"Dark urine or very little urine"
+]
+},
+"G": {
+"w": "Blood pressure review with his own doctor within a week. Return if the nosebleed recurs.",
+"m": [
+"Blood pressure after the bleed settles",
+"Nosebleed recurrence; pause steroid nasal spray for about a week"
+],
+"u": [
+"Bleeding that does not stop after two tries of 10 minutes of firm pressure",
+"Dizziness or fainting",
+"Headache, vision change, weakness or confusion"
+]
+},
+"H": {
+"w": "No routine review if checks are normal. Report the reaction to the blood bank; no riding or driving today.",
+"m": [
+"Fluids and meals",
+"Dizziness on standing"
+],
+"u": [
+"Repeat fainting",
+"Chest pain or palpitations",
+"Severe headache or confusion"
+]
+}
+}
